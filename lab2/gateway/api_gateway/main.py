@@ -95,6 +95,16 @@ async def order_summary(order_id: int, request: Request, user: Optional[CurrentU
 
 _METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 
+# public path segment -> service name used in logs and error messages
+SERVICE_NAMES = {
+    "auth": "auth-service",
+    "users": "user-service",
+    "products": "product-service",
+    "orders": "order-service",
+    "payments": "payment-service",
+    "notifications": "notification-service",
+}
+
 
 @proxy_router.api_route("/{service}", methods=_METHODS, include_in_schema=False)
 @proxy_router.api_route("/{service}/{path:path}", methods=_METHODS, include_in_schema=False)
@@ -126,7 +136,7 @@ def create_app(
     transports = transports or {}
     clients = {
         name: ServiceClient(
-            f"{name}-service", url, timeout=settings.http_timeout_seconds, transport=transports.get(name), connect_retries=1
+            SERVICE_NAMES[name], url, timeout=settings.http_timeout_seconds, transport=transports.get(name), connect_retries=1
         )
         for name, url in settings.upstreams().items()
     }

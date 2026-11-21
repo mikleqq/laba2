@@ -215,7 +215,40 @@ containers. Secrets (`JWT_SECRET`, `INTERNAL_TOKEN`, passwords) come from the ro
 * `GET /health`: liveness, the process is up.
 * `GET /ready`: readiness, with the dependencies checked: `{"checks": {"database": true, "message_broker": true}}`.
   The gateway's `/ready` checks every upstream service. It returns `503` when a dependency is down.
-* Docker health checks use `/health`, and `depends_on: service_healthy` sets the startup order.
+* Docker health checks use `/health`. Services wait only for PostgreSQL and RabbitMQ (`depends_on: service_healthy`), never for each other.
+
+## Fault isolation: one service down, the rest keep working
+
+The 6 microservices run in **6 separate containers** (`docker ps` shows `auth-service`, `user-service`,
+`product-service`, `order-service`, `payment-service`, `notification-service`). PostgreSQL, RabbitMQ and the
+gateway are infrastructure containers, not microservices. No microservice waits for another one at startup,
+so any of them can be stopped, restarted or rebuilt on its own:
+
+```powershell
+docker compose stop payment-service     # the other 5 services keep answering
+docker compose start payment-service
+```
+
+Automated demo (Windows PowerShell). It stops each service in turn, shows the health of all six, calls one
+endpoint of every service through the gateway, then starts the service again:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\failover-demo.ps1                 # all 6, one by one
+powershell -ExecutionPolicy Bypass -File scripts\failover-demo.ps1 -Service payment-service -Pause
+```
+
+What happens when a service is down (checked on the real stack):
+
+| Stopped | Fails (clean `502 upstream_unavailable`) | Still works |
+|---|---|---|
+| auth-service | login / register | everything else: issued JWTs stay valid because services verify them locally |
+| user-service | profile endpoints, registration | login, catalog, orders, payments, notifications |
+| product-service | catalog, placing new orders | login, profiles, existing orders, payments, notifications |
+| order-service | order endpoints | login, profiles, catalog, payments, notifications |
+| payment-service | payment endpoints | everything else; new orders are accepted as `pending_payment`, `order.created` waits in RabbitMQ and the order becomes `paid` as soon as payment-service is back |
+| notification-service | notification endpoints | everything else, including ordering and paying; missed events wait in RabbitMQ and are turned into notifications after the restart |
+
+The gateway's `GET /ready` shows which upstream is missing, for example `"payments": false`.
 
 ## Tests
 
@@ -250,6 +283,7 @@ laba2/
 │   └── notification-service/
 ├── gateway/                     # API Gateway
 ├── infrastructure/postgres/     # database-per-service init script
+├── scripts/failover-demo.ps1    # fault-isolation demo
 ├── tests/{unit,integration,e2e}/
 └── docs/                        # architecture.md, openapi/*.json
 ```
