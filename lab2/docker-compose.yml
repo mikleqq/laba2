@@ -77,6 +77,7 @@ services:
   auth-db:
     <<: *db-common
     container_name: auth-db
+    ports: ["5433:5432"]   # open in pgAdmin / DBeaver: localhost:5433, db auth_db, user auth_svc, password auth_pass
     environment:
       POSTGRES_DB: auth_db
       POSTGRES_USER: auth_svc
@@ -100,6 +101,7 @@ services:
   user-db:
     <<: *db-common
     container_name: user-db
+    ports: ["5434:5432"]   # open in pgAdmin / DBeaver: localhost:5434, db user_db, user user_svc, password user_pass
     environment:
       POSTGRES_DB: user_db
       POSTGRES_USER: user_svc
@@ -124,6 +126,7 @@ services:
   product-db:
     <<: *db-common
     container_name: product-db
+    ports: ["5435:5432"]   # open in pgAdmin / DBeaver: localhost:5435, db product_db, user product_svc, password product_pass
     environment:
       POSTGRES_DB: product_db
       POSTGRES_USER: product_svc
@@ -148,6 +151,7 @@ services:
   order-db:
     <<: *db-common
     container_name: order-db
+    ports: ["5436:5432"]   # open in pgAdmin / DBeaver: localhost:5436, db order_db, user order_svc, password order_pass
     environment:
       POSTGRES_DB: order_db
       POSTGRES_USER: order_svc
@@ -172,6 +176,7 @@ services:
   payment-db:
     <<: *db-common
     container_name: payment-db
+    ports: ["5437:5432"]   # open in pgAdmin / DBeaver: localhost:5437, db payment_db, user payment_svc, password payment_pass
     environment:
       POSTGRES_DB: payment_db
       POSTGRES_USER: payment_svc
@@ -195,6 +200,7 @@ services:
   notification-db:
     <<: *db-common
     container_name: notification-db
+    ports: ["5438:5432"]   # open in pgAdmin / DBeaver: localhost:5438, db notification_db, user notification_svc, password notification_pass
     environment:
       POSTGRES_DB: notification_db
       POSTGRES_USER: notification_svc

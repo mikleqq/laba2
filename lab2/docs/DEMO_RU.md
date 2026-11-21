@@ -63,7 +63,52 @@ docker compose down        # с сохранением данных
 docker compose down -v     # и удалить базы данных
 ```
 
-## 4. Демонстрация преподавателю
+## 4. База данных (PostgreSQL)
+
+База данных — **PostgreSQL 16**. Она запускается в Docker вместе с проектом, ничего ставить и настраивать не
+нужно. У каждого микросервиса своя база в своём контейнере. Таблицы сервисы создают сами при первом запуске,
+каталог заполняется демо-товарами.
+
+| Микросервис | Контейнер | Порт на компьютере | База | Пользователь / пароль | Таблицы |
+|---|---|---|---|---|---|
+| auth | `auth-db` | 5433 | `auth_db` | `auth_svc` / `auth_pass` | `credentials` |
+| user | `user-db` | 5434 | `user_db` | `user_svc` / `user_pass` | `profiles` |
+| product | `product-db` | 5435 | `product_db` | `product_svc` / `product_pass` | `products` |
+| order | `order-db` | 5436 | `order_db` | `order_svc` / `order_pass` | `orders`, `order_items` |
+| payment | `payment-db` | 5437 | `payment_db` | `payment_svc` / `payment_pass` | `payments` |
+| notification | `notification-db` | 5438 | `notification_db` | `notification_svc` / `notification_pass` | `notifications` |
+
+Порт 5432 специально не занят: на нём может работать твой собственный PostgreSQL.
+
+**Посмотреть все базы одной командой** (pgAdmin не нужен):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1
+powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1 -Service order -Rows 20
+```
+
+**Открыть в pgAdmin / DBeaver.** Создай новое подключение: Host `localhost`, порт и логин с паролем — из
+таблицы выше. Например, для заказов: `localhost:5436`, база `order_db`, пользователь `order_svc`, пароль
+`order_pass`.
+
+**Через psql** (он есть в установленном PostgreSQL):
+
+```powershell
+$env:PGPASSWORD = "order_pass"; & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -h localhost -p 5436 -U order_svc -d order_db -c "select * from orders"
+```
+
+**Что показать преподавателю.** Сделай заказ через Swagger (http://localhost:8080/docs) или запусти скрипт
+демонстрации, а потом `scripts\show-db.ps1`. Одна покупка записалась в **разные** базы, и каждая хранит только
+своё:
+
+* `order_db` — заказ и его позиции;
+* `product_db` — уменьшился остаток на складе;
+* `payment_db` — платёж со статусом `completed`;
+* `notification_db` — уведомления «Order received» и «Payment received».
+
+Сервисы не лезут в чужие базы, а общаются через API и события.
+
+## 5. Демонстрация преподавателю
 
 ### Вариант А — автоматический скрипт (рекомендую)
 
@@ -175,7 +220,7 @@ docker compose up -d --build --no-deps --force-recreate payment-service
 Пересобирается и перезапускается **только** `payment-service`. Его база, остальные сервисы, их базы, брокер и
 шлюз не трогаются. В `docker compose ps` у всех остальных время работы («Up N minutes») продолжает расти.
 
-## 5. Что сказать преподавателю (коротко)
+## 6. Что сказать преподавателю (коротко)
 
 1. «В системе 6 бизнес-микросервисов: auth, user, product, order, payment, notification. У каждого свой
    контейнер и **своя отдельная база данных в отдельном контейнере**. Плюс шлюз и RabbitMQ — это инфраструктура.
@@ -191,7 +236,7 @@ docker compose up -d --build --no-deps --force-recreate payment-service
    обрабатываются. Так заказ, сделанный во время падения оплаты, сам становится оплаченным».
 7. «Обновление одного сервиса — `docker compose up -d --build --no-deps <сервис>` — перезапускает только его».
 
-## 6. Возможные вопросы
+## 7. Возможные вопросы
 
 **Почему контейнеров 14, а не 6?**
 Микросервисов 6. У каждого есть ещё своя база данных — это тоже отдельный контейнер, чтобы падение одной

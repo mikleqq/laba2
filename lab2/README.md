@@ -95,6 +95,26 @@ curl http://localhost:8080/ready
 | http://localhost:8001/docs … :8006/docs | Swagger UI of auth, user, product, order, payment, notification |
 | http://localhost:15672 | RabbitMQ management UI (`shop` / `shop`) |
 
+### Databases (PostgreSQL 16, one container per service)
+
+| Service | Container | Host port | Database | User / password |
+|---|---|---|---|---|
+| auth | `auth-db` | 5433 | `auth_db` | `auth_svc` / `auth_pass` |
+| user | `user-db` | 5434 | `user_db` | `user_svc` / `user_pass` |
+| product | `product-db` | 5435 | `product_db` | `product_svc` / `product_pass` |
+| order | `order-db` | 5436 | `order_db` | `order_svc` / `order_pass` |
+| payment | `payment-db` | 5437 | `payment_db` | `payment_svc` / `payment_pass` |
+| notification | `notification-db` | 5438 | `notification_db` | `notification_svc` / `notification_pass` |
+
+Tables are created by the services on startup. Open them in pgAdmin/DBeaver with the values above, or
+print all six databases with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1
+```
+
+Port 5432 is left free on purpose, so a locally installed PostgreSQL does not conflict.
+
 The direct service ports (8001–8006) are published only for documentation and debugging. In production only
 the gateway would be exposed.
 
@@ -306,6 +326,7 @@ laba2/
 │   └── notification-service/
 ├── gateway/                     # API Gateway
 ├── scripts/failover-demo.ps1    # fault-isolation demo
+├── scripts/show-db.ps1          # print the contents of all 6 databases
 ├── tests/{unit,integration,e2e}/
 └── docs/                        # architecture.md, DEMO_RU.md (demo guide), openapi/*.json
 ```
