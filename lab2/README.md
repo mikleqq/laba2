@@ -1,7 +1,7 @@
 # ShopHub — Microservice Online Store (Lab 2)
 
 A backend for an online store built as **6 independent business microservices** plus an
-**API Gateway**. Python 3.12 + FastAPI, PostgreSQL (database per service), RabbitMQ
+**API Gateway**. Python 3.12 + FastAPI, a separate PostgreSQL container for every service, RabbitMQ
 (asynchronous events), all of it run with Docker Compose.
 
 ```
@@ -72,19 +72,19 @@ header from client requests, so clients can never reach them.
 | Area | Choice | Why |
 |---|---|---|
 | Language / framework | **Python 3.12 + FastAPI** | async I/O (many service-to-service calls), pydantic validation, OpenAPI/Swagger generated automatically |
-| Database | **PostgreSQL 16**, one database + one login role per service | ACID transactions for stock and payments; `REVOKE CONNECT` keeps services from reading each other's data |
+| Database | **PostgreSQL 16**, a separate container (`<name>-db`) with its own volume per service | ACID transactions for stock and payments; a database failure or migration affects only its own service |
 | ORM | **SQLAlchemy 2 (async) + asyncpg** | mature, async, the same models run on SQLite in tests |
 | Messaging | **RabbitMQ** (topic exchange) via aio-pika | routing by event type (`order.*`), durable queues, ack/reject, dead-letter queues; simpler to run than Kafka for this scale |
 | Sync communication | **REST + httpx** | simple, debuggable, documented with OpenAPI |
 | Auth | **JWT (HS256, PyJWT)** | stateless: the gateway and every service verify the token locally with no extra call to auth-service |
-| Deployment | **Docker Compose** | one command starts 9 containers with health checks and startup order |
+| Deployment | **Docker Compose** | one command starts 14 containers with health checks, startup order and automatic restart |
 | Tests | **pytest + pytest-asyncio + httpx ASGITransport** | the whole system runs in-process, with no Docker needed |
 
 ## Quick start
 
 ```bash
 cp .env.example .env            # optional: change secrets
-docker compose up -d --build    # postgres, rabbitmq, 6 services, gateway
+docker compose up -d --build    # 6 services + 6 databases + rabbitmq + gateway = 14 containers
 curl http://localhost:8080/ready
 ```
 
@@ -215,31 +215,53 @@ containers. Secrets (`JWT_SECRET`, `INTERNAL_TOKEN`, passwords) come from the ro
 * `GET /health`: liveness, the process is up.
 * `GET /ready`: readiness, with the dependencies checked: `{"checks": {"database": true, "message_broker": true}}`.
   The gateway's `/ready` checks every upstream service. It returns `503` when a dependency is down.
-* Docker health checks use `/health`. Services wait only for PostgreSQL and RabbitMQ (`depends_on: service_healthy`), never for each other.
+* Docker health checks use `/health`. Each service waits only for its own database and RabbitMQ (`depends_on: service_healthy`), never for another service.
 
 ## Fault isolation: one service down, the rest keep working
 
-The 6 microservices run in **6 separate containers** (`docker ps` shows `auth-service`, `user-service`,
-`product-service`, `order-service`, `payment-service`, `notification-service`). PostgreSQL, RabbitMQ and the
-gateway are infrastructure containers, not microservices. No microservice waits for another one at startup,
-so any of them can be stopped, restarted or rebuilt on its own:
+**6 microservices, 14 containers.** Every microservice is a pair of containers that belongs only to it:
+
+| Microservice | Application container | Own database container | Port |
+|---|---|---|---|
+| auth | `auth-service` | `auth-db` | 8001 |
+| user | `user-service` | `user-db` | 8002 |
+| product | `product-service` | `product-db` | 8003 |
+| order | `order-service` | `order-db` | 8004 |
+| payment | `payment-service` | `payment-db` | 8005 |
+| notification | `notification-service` | `notification-db` | 8006 |
+
+Plus `rabbitmq` (message broker) and `api-gateway` (entry point). These two are infrastructure, not microservices.
+
+Isolation measures:
+
+* **No startup dependencies between services.** A service waits only for its own DB and the broker.
+* **Database per container.** Stopping or breaking `payment-db` affects only payment-service.
+* **`restart: unless-stopped`.** A crashed service process is restarted by Docker automatically.
+* **Timeouts and clean errors.** Calls to a dead service fail fast with `502`/`503`/`504`. Nothing hangs and nothing cascades.
+* **Asynchronous events.** RabbitMQ keeps the events for a service that is down. Failed handlers are retried
+  every 5 s, for example while the service's database is down, and nothing is lost.
+* **Stateless JWT.** Every service verifies tokens itself, so logged-in users keep working even when auth-service is down.
+
+### Demo script
 
 ```powershell
-docker compose stop payment-service     # the other 5 services keep answering
-docker compose start payment-service
+powershell -ExecutionPolicy Bypass -File scriptsailover-demo.ps1 -Scenario all
+powershell -ExecutionPolicy Bypass -File scriptsailover-demo.ps1 -Scenario crash -Service payment-service -Pause
 ```
 
-Automated demo (Windows PowerShell). It stops each service in turn, shows the health of all six, calls one
-endpoint of every service through the gateway, then starts the service again:
+| Scenario | What it does |
+|---|---|
+| `stop` | `docker compose stop <service>`: the service container is switched off |
+| `crash` | `POST /chaos/crash` kills the service process (exit code 1); Docker restarts it on its own |
+| `database` | `docker compose stop <name>-db`: only that service answers `503`, the rest keep working |
+| `update` | `docker compose up -d --build --no-deps --force-recreate <service>`: only that container is replaced |
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\failover-demo.ps1                 # all 6, one by one
-powershell -ExecutionPolicy Bypass -File scripts\failover-demo.ps1 -Service payment-service -Pause
-```
+The crash endpoint exists only when `CHAOS_ENABLED=true` (it is on in `docker-compose.yml` for the demo) and
+needs `X-Internal-Token`. It is not reachable through the gateway.
 
 What happens when a service is down (checked on the real stack):
 
-| Stopped | Fails (clean `502 upstream_unavailable`) | Still works |
+| Down | Fails (clean `502 upstream_unavailable`) | Still works |
 |---|---|---|
 | auth-service | login / register | everything else: issued JWTs stay valid because services verify them locally |
 | user-service | profile endpoints, registration | login, catalog, orders, payments, notifications |
@@ -247,14 +269,15 @@ What happens when a service is down (checked on the real stack):
 | order-service | order endpoints | login, profiles, catalog, payments, notifications |
 | payment-service | payment endpoints | everything else; new orders are accepted as `pending_payment`, `order.created` waits in RabbitMQ and the order becomes `paid` as soon as payment-service is back |
 | notification-service | notification endpoints | everything else, including ordering and paying; missed events wait in RabbitMQ and are turned into notifications after the restart |
+| `<name>-db` | only that service's endpoints (`503 database_error`) | all other services; the service itself stays alive and recovers when its DB is back |
 
-The gateway's `GET /ready` shows which upstream is missing, for example `"payments": false`.
+A step-by-step demo guide in Russian is in [docs/DEMO_RU.md](docs/DEMO_RU.md).
 
 ## Tests
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                       # 50 unit + integration tests, no Docker needed (~5 s)
+pytest                       # 53 unit + integration tests, no Docker needed (~6 s)
 docker compose up -d --build
 pytest -m e2e                # smoke test against the real stack (PostgreSQL + RabbitMQ)
 ```
@@ -282,10 +305,9 @@ laba2/
 │   ├── payment-service/
 │   └── notification-service/
 ├── gateway/                     # API Gateway
-├── infrastructure/postgres/     # database-per-service init script
 ├── scripts/failover-demo.ps1    # fault-isolation demo
 ├── tests/{unit,integration,e2e}/
-└── docs/                        # architecture.md, openapi/*.json
+└── docs/                        # architecture.md, DEMO_RU.md (demo guide), openapi/*.json
 ```
 
 ## Known limitations / possible improvements
@@ -293,5 +315,4 @@ laba2/
   broker is down at that moment. For now a failed publish is logged as an error.
 * Schemas are created with `create_all`. A real project would use Alembic migrations.
 * The rate limiter keeps its state in memory (per gateway instance). With several replicas it would use Redis.
-* One PostgreSQL *server* hosts six isolated databases to keep the lab light. Every service can be pointed to
-  its own server just by changing `DATABASE_URL`.
+* RabbitMQ is a single container. In production it would be a cluster with quorum queues.

@@ -19,6 +19,18 @@ REQUEST_ID_HEADER = "X-Request-ID"
 _QUIET_PATHS = {"/health", "/ready"}
 
 
+def _is_dependency_failure(exc: BaseException) -> bool:
+    """Network-level DB errors (host down, connection refused) are raised by the driver
+    as OSError / asyncpg errors, not as SQLAlchemy exceptions."""
+    seen = 0
+    while exc is not None and seen < 5:
+        if isinstance(exc, OSError) or type(exc).__module__.startswith("asyncpg"):
+            return True
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return False
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, service_name: str) -> None:
         super().__init__(app)
@@ -32,9 +44,15 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         try:
             try:
                 response = await call_next(request)
-            except Exception:  # noqa: BLE001 - last line of defence, never leak a stack trace
-                logger.exception("unhandled error")
-                response = JSONResponse(status_code=500, content=error_body("internal_error", "Internal server error"))
+            except Exception as exc:  # noqa: BLE001 - last line of defence, never leak a stack trace
+                if _is_dependency_failure(exc):
+                    logger.error("dependency unavailable", extra=log_extra(error=f"{type(exc).__name__}: {exc}"))
+                    response = JSONResponse(
+                        status_code=503, content=error_body("database_error", "Database is temporarily unavailable")
+                    )
+                else:
+                    logger.exception("unhandled error")
+                    response = JSONResponse(status_code=500, content=error_body("internal_error", "Internal server error"))
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             response.headers[REQUEST_ID_HEADER] = request_id
             if request.url.path not in _QUIET_PATHS:

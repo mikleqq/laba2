@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Awaitable, Callable, Iterable, Optional
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import MetaData
 
@@ -16,6 +18,7 @@ from .errors import register_exception_handlers
 from .logging import log_extra, setup_logging
 from .messaging import EventBus, InMemoryEventBus, RabbitMQEventBus
 from .middleware import RequestContextMiddleware
+from .security import require_internal
 
 logger = logging.getLogger("shopcommon.app")
 
@@ -43,6 +46,19 @@ def _health_router(service_name: str, version: str) -> APIRouter:
             status_code=200 if ok else 503,
             content={"status": "ready" if ok else "not_ready", "service": service_name, "checks": checks},
         )
+
+    return router
+
+
+def _chaos_router(service_name: str) -> APIRouter:
+    """Failure injection for demonstrations: makes the process die like a real crash."""
+    router = APIRouter(prefix="/chaos", tags=["chaos (demo only)"], dependencies=[Depends(require_internal)])
+
+    @router.post("/crash", summary="Simulate a crash: the process exits with code 1 (Docker restarts it)")
+    async def crash(request: Request) -> dict:
+        logger.critical("simulated crash requested, process is going down")
+        asyncio.get_running_loop().call_later(0.3, request.app.state.crash)
+        return {"status": "crashing", "service": service_name}
 
     return router
 
@@ -116,6 +132,9 @@ def create_service_app(
     app.add_middleware(RequestContextMiddleware, service_name=settings.service_name)
     register_exception_handlers(app)
     app.include_router(_health_router(settings.service_name, version))
+    app.state.crash = lambda: os._exit(1)
+    if settings.chaos_enabled:
+        app.include_router(_chaos_router(settings.service_name))
     for router in routers:
         app.include_router(router)
     return app

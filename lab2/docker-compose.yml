@@ -1,11 +1,22 @@
 name: shophub
 
+# ShopHub: 6 microservices. Each one is a pair of containers that belongs only to it:
+#
+#   <name>-service  (application)  ->  <name>-db  (its own PostgreSQL, its own volume)
+#
+# + rabbitmq (message broker) + api-gateway (entry point) = 14 containers.
+# A crash, restart, rebuild or database failure of one service does not touch the
+# containers of the other services:
+#   docker compose stop payment-service                          # stop one service
+#   docker compose stop payment-db                               # break its database
+#   docker compose up -d --build --no-deps payment-service       # redeploy only it
+
 x-service-common: &service-common
-  restart: unless-stopped
+  restart: unless-stopped   # a crashed service is restarted automatically by Docker
   networks: [backend]
   healthcheck:
     test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
-    interval: 10s
+    interval: 5s
     timeout: 3s
     retries: 10
     start_period: 15s
@@ -15,33 +26,24 @@ x-common-env: &common-env
   JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
   INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token-change-me}
   RABBITMQ_URL: amqp://${RABBITMQ_USER:-shop}:${RABBITMQ_PASSWORD:-shop}@rabbitmq:5672/
+  CHAOS_ENABLED: ${CHAOS_ENABLED:-true}   # enables POST /chaos/crash for the failure demo
 
-x-depends-infra: &depends-infra
-  postgres:
-    condition: service_healthy
-  rabbitmq:
-    condition: service_healthy
+x-db-common: &db-common
+  image: postgres:16-alpine
+  restart: unless-stopped
+  networks: [backend]
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
 
 services:
-  # ---------------- infrastructure ----------------
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    volumes:
-      - ./infrastructure/postgres/init-databases.sql:/docker-entrypoint-initdb.d/01-init-databases.sql:ro
-      - pgdata:/var/lib/postgresql/data
-    ports: ["5432:5432"]
-    networks: [backend]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
+  # ---------------- message broker ----------------
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-shop}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-shop}
@@ -55,11 +57,7 @@ services:
       timeout: 5s
       retries: 20
 
-  # ---------------- business services ----------------
-  # 6 microservices = 6 independent containers. None of them waits for another
-  # service at startup (only for its database / the broker), so any one of them
-  # can be stopped, restarted or rebuilt without touching the others:
-  #   docker compose stop payment-service      docker compose start payment-service
+  # ================= auth-service (credentials, password hashes, JWT) =================
   auth-service:
     <<: *service-common
     container_name: auth-service
@@ -67,13 +65,25 @@ services:
     environment:
       <<: *common-env
       SERVICE_NAME: auth-service
-      DATABASE_URL: postgresql+asyncpg://auth_svc:auth_pass@postgres:5432/auth_db
+      DATABASE_URL: postgresql+asyncpg://auth_svc:auth_pass@auth-db:5432/auth_db
       USER_SERVICE_URL: http://user-service:8000
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin12345!}
     ports: ["8001:8000"]
-    depends_on: *depends-infra
+    depends_on:
+      auth-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
+  auth-db:
+    <<: *db-common
+    container_name: auth-db
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_svc
+      POSTGRES_PASSWORD: auth_pass
+    volumes: ["auth-data:/var/lib/postgresql/data"]
+
+  # ================= user-service (customer profiles) =================
   user-service:
     <<: *service-common
     container_name: user-service
@@ -81,10 +91,22 @@ services:
     environment:
       <<: *common-env
       SERVICE_NAME: user-service
-      DATABASE_URL: postgresql+asyncpg://user_svc:user_pass@postgres:5432/user_db
+      DATABASE_URL: postgresql+asyncpg://user_svc:user_pass@user-db:5432/user_db
     ports: ["8002:8000"]
-    depends_on: *depends-infra
+    depends_on:
+      user-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
+  user-db:
+    <<: *db-common
+    container_name: user-db
+    environment:
+      POSTGRES_DB: user_db
+      POSTGRES_USER: user_svc
+      POSTGRES_PASSWORD: user_pass
+    volumes: ["user-data:/var/lib/postgresql/data"]
+
+  # ================= product-service (catalog and stock) =================
   product-service:
     <<: *service-common
     container_name: product-service
@@ -92,11 +114,23 @@ services:
     environment:
       <<: *common-env
       SERVICE_NAME: product-service
-      DATABASE_URL: postgresql+asyncpg://product_svc:product_pass@postgres:5432/product_db
+      DATABASE_URL: postgresql+asyncpg://product_svc:product_pass@product-db:5432/product_db
       SEED_DEMO_DATA: "true"
     ports: ["8003:8000"]
-    depends_on: *depends-infra
+    depends_on:
+      product-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
+  product-db:
+    <<: *db-common
+    container_name: product-db
+    environment:
+      POSTGRES_DB: product_db
+      POSTGRES_USER: product_svc
+      POSTGRES_PASSWORD: product_pass
+    volumes: ["product-data:/var/lib/postgresql/data"]
+
+  # ================= order-service (orders) =================
   order-service:
     <<: *service-common
     container_name: order-service
@@ -104,11 +138,23 @@ services:
     environment:
       <<: *common-env
       SERVICE_NAME: order-service
-      DATABASE_URL: postgresql+asyncpg://order_svc:order_pass@postgres:5432/order_db
+      DATABASE_URL: postgresql+asyncpg://order_svc:order_pass@order-db:5432/order_db
       PRODUCT_SERVICE_URL: http://product-service:8000
     ports: ["8004:8000"]
-    depends_on: *depends-infra
+    depends_on:
+      order-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
+  order-db:
+    <<: *db-common
+    container_name: order-db
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: order_svc
+      POSTGRES_PASSWORD: order_pass
+    volumes: ["order-data:/var/lib/postgresql/data"]
+
+  # ================= payment-service (payments) =================
   payment-service:
     <<: *service-common
     container_name: payment-service
@@ -116,11 +162,23 @@ services:
     environment:
       <<: *common-env
       SERVICE_NAME: payment-service
-      DATABASE_URL: postgresql+asyncpg://payment_svc:payment_pass@postgres:5432/payment_db
+      DATABASE_URL: postgresql+asyncpg://payment_svc:payment_pass@payment-db:5432/payment_db
       MAX_PAYMENT_AMOUNT: ${MAX_PAYMENT_AMOUNT:-5000}
     ports: ["8005:8000"]
-    depends_on: *depends-infra
+    depends_on:
+      payment-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
+  payment-db:
+    <<: *db-common
+    container_name: payment-db
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: payment_svc
+      POSTGRES_PASSWORD: payment_pass
+    volumes: ["payment-data:/var/lib/postgresql/data"]
+
+  # ================= notification-service (notifications) =================
   notification-service:
     <<: *service-common
     container_name: notification-service
@@ -128,11 +186,22 @@ services:
     environment:
       <<: *common-env
       SERVICE_NAME: notification-service
-      DATABASE_URL: postgresql+asyncpg://notification_svc:notification_pass@postgres:5432/notification_db
+      DATABASE_URL: postgresql+asyncpg://notification_svc:notification_pass@notification-db:5432/notification_db
     ports: ["8006:8000"]
-    depends_on: *depends-infra
+    depends_on:
+      notification-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
-  # ---------------- edge ----------------
+  notification-db:
+    <<: *db-common
+    container_name: notification-db
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: notification_svc
+      POSTGRES_PASSWORD: notification_pass
+    volumes: ["notification-data:/var/lib/postgresql/data"]
+
+  # ================= api-gateway (entry point, not a business service) =================
   api-gateway:
     <<: *service-common
     container_name: api-gateway
@@ -147,14 +216,19 @@ services:
       ORDER_SERVICE_URL: http://order-service:8000
       PAYMENT_SERVICE_URL: http://payment-service:8000
       NOTIFICATION_SERVICE_URL: http://notification-service:8000
-      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-300}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
     ports: ["8080:8000"]
-    # No depends_on on the services: the gateway runs even when some of them are down
-    # and answers 502 only for the routes of the missing service.
+    # No depends_on on the services: the gateway keeps running when a service is down
+    # and answers 502 only for the routes of that service.
 
 networks:
   backend:
 
 volumes:
-  pgdata:
+  auth-data:
+  user-data:
+  product-data:
+  order-data:
+  payment-data:
+  notification-data:

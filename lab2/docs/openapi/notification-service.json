@@ -48,6 +48,39 @@
                 }
             }
         },
+        "/chaos/crash": {
+            "post": {
+                "tags": [
+                    "chaos (demo only)"
+                ],
+                "summary": "Simulate a crash: the process exits with code 1 (Docker restarts it)",
+                "operationId": "crash_chaos_crash_post",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": true,
+                                    "type": "object",
+                                    "title": "Response Crash Chaos Crash Post"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/notifications": {
             "get": {
                 "tags": [

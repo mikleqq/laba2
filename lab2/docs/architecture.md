@@ -87,17 +87,18 @@ out of `pending_payment` once. Redelivered events therefore do no harm.
 ## 5. Data storage
 
 ```
-postgres (one server for the lab)
-├── auth_db          owner auth_svc          credentials
-├── user_db          owner user_svc          profiles
-├── product_db       owner product_svc       products (CHECK stock >= 0)
-├── order_db         owner order_svc         orders, order_items
-├── payment_db       owner payment_svc       payments (UNIQUE order_id)
-└── notification_db  owner notification_svc  notifications (UNIQUE event_id)
+container        database          user              tables
+auth-db          auth_db           auth_svc          credentials
+user-db          user_db           user_svc          profiles
+product-db       product_db        product_svc       products (CHECK stock >= 0)
+order-db         order_db          order_svc         orders, order_items
+payment-db       payment_db        payment_svc       payments (UNIQUE order_id)
+notification-db  notification_db   notification_svc  notifications (UNIQUE event_id)
 ```
-`REVOKE CONNECT ... FROM PUBLIC`: each role can connect only to its own database, which is checked by the e2e
-verification (`order_svc` → `product_db` is refused). Moving any database to its own server needs only a
-change of `DATABASE_URL`.
+Every service has its own PostgreSQL **container** with its own volume and credentials. Services cannot see
+each other's data. A crash, restart, upgrade or migration of one database affects only its own service. While
+its database is down the service stays alive: `/health` is 200, `/ready` is 503, its API answers
+`503 database_error`, and incoming events are retried until the database is back.
 
 Stock reservation uses `SELECT ... FOR UPDATE` in one transaction. Concurrent orders cannot oversell, and a
 multi-item order is all-or-nothing.

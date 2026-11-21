@@ -6,8 +6,10 @@ Event envelope::
      "request_id": "...", "data": {...}}
 
 Delivery guarantees (RabbitMQ): durable exchange & queues, persistent messages,
-manual ack. A message whose handler fails is rejected to a per-queue dead-letter
-queue (``<queue>.dlq``). Consumers are written to be idempotent.
+manual ack. A message whose handler fails (e.g. the service's database is down)
+is parked in ``<queue>.retry`` and comes back after ``retry_delay_ms``; after
+``max_attempts`` it goes to the dead-letter queue ``<queue>.dlq``. Consumers are
+written to be idempotent.
 """
 
 from __future__ import annotations
@@ -151,8 +153,18 @@ class InMemoryEventBus(EventBus):
 
 
 class RabbitMQEventBus(EventBus):
-    def __init__(self, url: str, *, service_name: str, exchange_name: str = "shop.events") -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        service_name: str,
+        exchange_name: str = "shop.events",
+        retry_delay_ms: int = 5000,
+        max_attempts: int = 60,
+    ) -> None:
         self.url = url
+        self.retry_delay_ms = retry_delay_ms
+        self.max_attempts = max_attempts
         self.service_name = service_name
         self.exchange_name = exchange_name
         self._connection = None
@@ -206,6 +218,19 @@ class RabbitMQEventBus(EventBus):
         return event
 
     async def subscribe(self, queue_name: str, routing_keys: list[str], handler: Handler, *, service_name: str) -> None:
+        import aio_pika
+
+        retry_queue = f"{queue_name}.retry"
+        # Messages expire from the retry queue back into the main queue (delayed retry).
+        await self._channel.declare_queue(
+            retry_queue,
+            durable=True,
+            arguments={
+                "x-message-ttl": self.retry_delay_ms,
+                "x-dead-letter-exchange": "",
+                "x-dead-letter-routing-key": queue_name,
+            },
+        )
         dlq = await self._channel.declare_queue(f"{queue_name}.dlq", durable=True)
         await dlq.bind(self._dlx, routing_key=queue_name)
         queue = await self._channel.declare_queue(
@@ -225,8 +250,26 @@ class RabbitMQEventBus(EventBus):
                 return
             if await run_handler(handler, event, service_name):
                 await message.ack()
-            else:
+                return
+            attempts = int((message.headers or {}).get("x-attempts", 0)) + 1
+            if attempts >= self.max_attempts:
+                logger.error("giving up, message moved to DLQ", extra=log_extra(queue=queue_name, attempts=attempts))
                 await message.reject(requeue=False)  # -> dead-letter queue
+                return
+            retry = aio_pika.Message(
+                body=message.body,
+                content_type=message.content_type,
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                message_id=message.message_id,
+                type=message.type,
+                headers={**(message.headers or {}), "x-attempts": attempts},
+            )
+            await self._channel.default_exchange.publish(retry, routing_key=retry_queue)
+            await message.ack()
+            logger.warning(
+                "event will be retried",
+                extra=log_extra(queue=queue_name, attempts=attempts, delay_ms=self.retry_delay_ms),
+            )
 
         await queue.consume(on_message)
         logger.info("subscribed", extra=log_extra(queue=queue_name, routing_keys=routing_keys))

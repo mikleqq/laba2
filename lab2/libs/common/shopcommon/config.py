@@ -34,6 +34,9 @@ class BaseServiceSettings(BaseSettings):
     # Outgoing HTTP calls to other services
     http_timeout_seconds: float = 5.0
 
+    # Failure demo: exposes POST /chaos/crash (internal token required). Never enable in production.
+    chaos_enabled: bool = False
+
     # Startup: how long to wait for DB / broker to become available
     startup_retries: int = 30
     startup_retry_delay_seconds: float = 2.0
