@@ -30,7 +30,7 @@ def create_app(settings: Optional[Settings] = None, *, bus: Optional[EventBus] =
     return create_service_app(
         settings=settings,
         title="ShopHub Notification Service",
-        description="Consumes domain events from RabbitMQ and notifies users (email channel stub).",
+        description="Consumes domain events from the event bus and notifies users (email channel stub).",
         metadata=Base.metadata,
         bus=bus,
         routers=[router],

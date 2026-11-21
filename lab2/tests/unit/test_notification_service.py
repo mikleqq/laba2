@@ -18,8 +18,8 @@ async def test_events_become_notifications():
         body = r.json()
         assert body["total"] == 3 and body["unread"] == 3
         subjects = [n["subject"] for n in body["items"]]
-        assert "Welcome to ShopHub!" in subjects
-        assert "Order #10 received" in subjects
+        assert "Добро пожаловать в ShopHub!" in subjects
+        assert "Заказ №10 принят" in subjects
         assert any("declined" in n["message"] for n in body["items"])
 
         nid = body["items"][0]["id"]

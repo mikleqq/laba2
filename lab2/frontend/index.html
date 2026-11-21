@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopHub — магазин на 6 микросервисах</title>
+<style>
+  :root {
+    --bg: #f4f1ec;
+    --panel: #ffffff;
+    --ink: #1d2430;
+    --muted: #6b7280;
+    --line: #e6e1d8;
+    --brand: #ff6b35;
+    --brand-ink: #ffffff;
+    --navy: #121a2b;
+    --navy-2: #1b2640;
+    --navy-line: #2a3756;
+    --navy-ink: #e7ecf7;
+    --navy-muted: #93a0bd;
+    --ok: #22c55e;
+    --ok-soft: #dcfce7;
+    --bad: #ef4444;
+    --bad-soft: #fee2e2;
+    --warn: #f59e0b;
+    --warn-soft: #fef3c7;
+    --info: #3b82f6;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 16px rgba(16, 24, 40, .06);
+    --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  button { font: inherit; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .5; }
+  input { font: inherit; }
+
+  /* ---------------- top bar ---------------- */
+  .topbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 28px; background: var(--navy); color: var(--navy-ink);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 22px; letter-spacing: -.02em; }
+  .brand .logo {
+    width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+    background: var(--brand); color: var(--brand-ink); font-size: 20px;
+  }
+  .brand small { display: block; font-weight: 500; font-size: 12px; color: var(--navy-muted); letter-spacing: 0; }
+  .topbar .spacer { flex: 1; }
+  .who { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  .who .name { font-weight: 600; }
+  .btn {
+    border: 0; border-radius: 10px; padding: 9px 16px; font-weight: 600;
+    background: var(--brand); color: var(--brand-ink);
+  }
+  .btn.ghost { background: transparent; color: inherit; border: 1px solid currentColor; opacity: .85; }
+  .btn.small { padding: 6px 12px; font-size: 13px; }
+  .btn.dark { background: var(--ink); color: #fff; }
+  .bell {
+    position: relative; background: var(--navy-2); border: 1px solid var(--navy-line); color: var(--navy-ink);
+    border-radius: 10px; padding: 7px 11px; font-size: 16px;
+  }
+  .bell .count {
+    position: absolute; top: -6px; right: -6px; min-width: 19px; height: 19px; border-radius: 10px;
+    background: var(--brand); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; padding: 0 5px;
+  }
+
+  /* ---------------- control room ---------------- */
+  .control {
+    background: linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
+    color: var(--navy-ink); padding: 8px 28px 26px;
+  }
+  .control-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .control-head h2 { margin: 0; font-size: 17px; }
+  .control-head .facts { color: var(--navy-muted); font-size: 13px; }
+  .control-head .summary { margin-left: auto; font-weight: 700; font-size: 14px; }
+  .control-head .summary.all-ok { color: var(--ok); }
+  .control-head .summary.degraded { color: var(--warn); }
+
+  .services { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .svc {
+    position: relative; background: rgba(255, 255, 255, .04); border: 1px solid var(--navy-line);
+    border-radius: var(--radius); padding: 14px 14px 12px; transition: border-color .3s, background .3s, transform .3s;
+  }
+  .svc .top { display: flex; align-items: center; gap: 8px; }
+  .svc .ico { font-size: 22px; }
+  .svc .title { font-weight: 700; }
+  .svc .cname { font-family: var(--mono); font-size: 12px; color: var(--navy-muted); margin-top: 2px; }
+  .svc .role { font-size: 12px; color: var(--navy-muted); margin: 6px 0 10px; min-height: 17px; }
+  .svc .state { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--navy-muted); flex: none; }
+  .svc .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--navy-muted); margin-top: 6px; font-family: var(--mono); }
+  .svc .meta a { color: var(--navy-muted); }
+  .svc .crash {
+    width: 100%; margin-top: 10px; border-radius: 9px; padding: 7px 8px; font-size: 13px; font-weight: 600;
+    border: 1px solid #5b2330; background: rgba(239, 68, 68, .12); color: #fecaca;
+  }
+  .svc .crash:hover:not(:disabled) { background: rgba(239, 68, 68, .25); }
+
+  .svc.up { border-color: rgba(34, 197, 94, .45); }
+  .svc.up .dot { background: var(--ok); box-shadow: 0 0 0 4px rgba(34, 197, 94, .18); animation: beat 2s infinite; }
+  .svc.up .state { color: #86efac; }
+  .svc.down { border-color: var(--bad); background: rgba(239, 68, 68, .12); animation: shake .45s; }
+  .svc.down .dot { background: var(--bad); box-shadow: 0 0 0 4px rgba(239, 68, 68, .25); }
+  .svc.down .state { color: #fca5a5; }
+  .svc.restarting { border-color: var(--warn); background: rgba(245, 158, 11, .12); }
+  .svc.restarting .dot { background: var(--warn); animation: blink .6s infinite; }
+  .svc.restarting .state { color: #fcd34d; }
+
+  @keyframes beat { 0%, 100% { box-shadow: 0 0 0 3px rgba(34, 197, 94, .18); } 50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, .05); } }
+  @keyframes blink { 50% { opacity: .25; } }
+  @keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+
+  .db {
+    margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    border: 1px dashed var(--navy-line); border-radius: var(--radius); padding: 10px 14px; font-size: 13px; color: var(--navy-muted);
+  }
+  .db b { color: var(--navy-ink); }
+  .db .schemas { display: flex; gap: 6px; flex-wrap: wrap; }
+  .db .schemas span { font-family: var(--mono); font-size: 12px; background: rgba(255, 255, 255, .06); border-radius: 6px; padding: 2px 7px; }
+  .hint { margin-top: 10px; font-size: 13px; color: var(--navy-muted); }
+  .hint code { font-family: var(--mono); background: rgba(255, 255, 255, .08); padding: 1px 6px; border-radius: 5px; color: var(--navy-ink); }
+
+  /* ---------------- shop ---------------- */
+  .shop { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; padding: 22px 28px; align-items: start; }
+  .side { display: grid; gap: 20px; }
+  .panel {
+    position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 18px; overflow: hidden;
+  }
+  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .panel-head h3 { margin: 0; font-size: 18px; }
+  .tag {
+    font-family: var(--mono); font-size: 11.5px; padding: 3px 8px; border-radius: 999px;
+    background: #eef2ff; color: #3730a3; white-space: nowrap;
+  }
+  .panel-head .tag { margin-left: auto; }
+
+  .panel .offline {
+    position: absolute; inset: 0; display: none; place-content: center; text-align: center; gap: 6px; padding: 20px;
+    background: repeating-linear-gradient(-45deg, rgba(254, 226, 226, .93), rgba(254, 226, 226, .93) 12px, rgba(255, 241, 241, .93) 12px, rgba(255, 241, 241, .93) 24px);
+    z-index: 5;
+  }
+  .panel .offline .big { font-size: 30px; }
+  .panel .offline b { color: #991b1b; font-size: 16px; }
+  .panel .offline span { color: #7f1d1d; font-size: 13px; max-width: 340px; }
+  .panel.is-down .offline { display: grid; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+  .product { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: #fffdfa; }
+  .product .pic { font-size: 44px; height: 72px; display: grid; place-items: center; background: #fff4ec; border-radius: 10px; }
+  .product .pname { font-weight: 700; line-height: 1.25; }
+  .product .pdesc { color: var(--muted); font-size: 12.5px; flex: 1; }
+  .product .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .product .price { font-weight: 800; font-size: 17px; }
+  .product .stock { font-size: 12px; color: var(--muted); }
+  .product .stock.low { color: #b45309; font-weight: 600; }
+  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+
+  .cart-line { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .cart-line .n { flex: 1; }
+  .qty { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; }
+  .qty button { border: 0; background: none; width: 26px; height: 26px; }
+  .qty span { min-width: 22px; text-align: center; font-weight: 600; }
+  .cart-total { display: flex; justify-content: space-between; font-weight: 800; font-size: 16px; margin: 12px 0; }
+  .cart .btn { width: 100%; padding: 11px; }
+
+  .order { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+  .order .o-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .order .o-id { font-weight: 700; }
+  .order .o-items { color: var(--muted); font-size: 12.5px; margin: 4px 0 8px; }
+  .order .o-bottom { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #f1f5f9; color: #334155; }
+  .chip.ok { background: var(--ok-soft); color: #166534; }
+  .chip.bad { background: var(--bad-soft); color: #991b1b; }
+  .chip.warn { background: var(--warn-soft); color: #92400e; }
+  .chip.off { background: #f1f5f9; color: #64748b; border: 1px dashed #cbd5e1; }
+  .link { border: 0; background: none; color: var(--muted); text-decoration: underline; font-size: 12px; padding: 0; margin-left: auto; }
+
+  .note { border-left: 3px solid var(--brand); padding: 6px 10px; margin-bottom: 8px; background: #fffaf6; border-radius: 0 8px 8px 0; }
+  .note.read { border-left-color: var(--line); background: transparent; }
+  .note .s { font-weight: 700; font-size: 13.5px; }
+  .note .m { font-size: 12.5px; color: var(--muted); }
+  .note .t { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+
+  .profile dl { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; margin: 0; font-size: 14px; }
+  .profile dt { color: var(--muted); }
+  .profile dd { margin: 0; font-weight: 600; word-break: break-all; }
+  .profile form { display: flex; gap: 8px; margin-top: 10px; }
+  .profile input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; }
+
+  .need-login { color: var(--muted); font-size: 14px; }
+
+  /* ---------------- journal ---------------- */
+  .journal { margin: 0 28px 28px; background: var(--navy); color: var(--navy-ink); border-radius: var(--radius); padding: 14px 18px; }
+  .journal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .journal-head h3 { margin: 0; font-size: 15px; }
+  .journal-head .btn { margin-left: auto; }
+  .log { font-family: var(--mono); font-size: 12.5px; max-height: 230px; overflow: auto; display: grid; gap: 2px; }
+  .log div { display: grid; grid-template-columns: 70px 150px 1fr 48px; gap: 10px; padding: 2px 0; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+  .log .time { color: var(--navy-muted); }
+  .log .who { color: #93c5fd; }
+  .log .code { text-align: right; }
+  .log .ok .code { color: #86efac; }
+  .log .bad .code, .log .bad .msg { color: #fca5a5; }
+  .log .sys .msg { color: #fcd34d; }
+
+  /* ---------------- dialog & toast ---------------- */
+  dialog { border: 0; border-radius: 16px; padding: 0; width: min(420px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgba(0, 0, 0, .35); }
+  dialog::backdrop { background: rgba(18, 26, 43, .55); }
+  .dlg { padding: 22px; position: relative; }
+  .dlg h3 { margin: 0 0 4px; }
+  .dlg p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .tabs button { flex: 1; border: 1px solid var(--line); background: #fff; border-radius: 9px; padding: 8px; font-weight: 600; }
+  .tabs button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .dlg label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+  .dlg input { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; }
+  .dlg .actions { display: flex; gap: 8px; margin-top: 16px; }
+  .dlg .actions .btn { flex: 1; }
+  .dlg .err { color: var(--bad); font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .dlg .offline { position: absolute; inset: 0; display: none; place-content: center; text-align: center; gap: 6px; padding: 20px; background: rgba(254, 226, 226, .96); border-radius: 16px; }
+  .dlg.is-down .offline { display: grid; }
+  .dlg .offline b { color: #991b1b; }
+
+  .toast {
+    position: fixed; right: 20px; bottom: 20px; z-index: 50; max-width: 380px;
+    background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow);
+    transform: translateY(20px); opacity: 0; transition: .25s; pointer-events: none; font-size: 14px;
+  }
+  .toast.show { transform: none; opacity: 1; }
+  .toast.bad { background: #7f1d1d; }
+  .toast.ok { background: #14532d; }
+
+  @media (max-width: 1200px) { .services { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 900px) {
+    .shop { grid-template-columns: 1fr; padding: 16px; }
+    .topbar, .control { padding-left: 16px; padding-right: 16px; }
+    .journal { margin: 0 16px 16px; }
+    .log div { grid-template-columns: 62px 1fr 40px; }
+    .log .who { display: none; }
+  }
+  @media (max-width: 560px) { .services { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">⚡</div>
+    <div>ShopHub<small>магазин электроники на 6 микросервисах</small></div>
+  </div>
+  <div class="spacer"></div>
+  <div class="who" id="who"></div>
+</header>
+
+<section class="control">
+  <div class="control-head">
+    <h2>Пульт системы</h2>
+    <span class="facts">6 микросервисов · 6 Docker-контейнеров · 1 база PostgreSQL</span>
+    <span class="summary" id="summary">проверка…</span>
+  </div>
+  <div class="services" id="services"></div>
+  <div class="db">
+    🐘 <b>PostgreSQL · база shophub</b> — одна на всех, у каждого сервиса своя схема и свой пользователь:
+    <div class="schemas">
+      <span>auth</span><span>users</span><span>products</span><span>orders</span><span>payments</span><span>notifications</span><span>bus (события)</span>
+    </div>
+  </div>
+  <div class="hint">
+    💥 «Уронить» — процесс сервиса аварийно завершается, Docker сам поднимает контейнер.
+    Или в терминале: <code>docker compose stop payment-service</code> → магазин работает дальше → <code>docker compose start payment-service</code>.
+  </div>
+</section>
+
+<main class="shop">
+  <section class="panel" id="catalog" data-svc="product">
+    <div class="panel-head"><h3>🛍️ Каталог</h3><span class="tag">product-service :8003</span></div>
+    <div class="grid" id="products"><div class="empty">Загрузка каталога…</div></div>
+    <div class="offline"><div class="big">📦💥</div><b>Каталог временно недоступен</b><span>product-service не отвечает. Корзина, заказы, оплата, уведомления и профиль продолжают работать.</span></div>
+  </section>
+
+  <div class="side">
+    <section class="panel cart" id="cart" data-svc="order">
+      <div class="panel-head"><h3>🛒 Корзина</h3><span class="tag">order-service :8004</span></div>
+      <div id="cart-lines"></div>
+      <div class="cart-total"><span>Итого</span><span id="cart-total">0 $</span></div>
+      <button class="btn" id="checkout">Оформить заказ</button>
+      <div class="offline"><div class="big">🧾💥</div><b>Оформление заказов недоступно</b><span>order-service не отвечает. Товары остаются в корзине — оформите заказ, когда сервис поднимется.</span></div>
+    </section>
+
+    <section class="panel" id="orders-panel" data-svc="order">
+      <div class="panel-head"><h3>🧾 Мои заказы</h3><span class="tag">order + payment</span></div>
+      <div id="orders"><div class="need-login">Войдите, чтобы видеть заказы.</div></div>
+      <div class="offline"><div class="big">🧾💥</div><b>История заказов недоступна</b><span>order-service не отвечает. Остальной магазин работает.</span></div>
+    </section>
+
+    <section class="panel" id="notes-panel" data-svc="notification">
+      <div class="panel-head"><h3>🔔 Уведомления</h3><span class="tag">notification-service :8006</span></div>
+      <div id="notes"><div class="need-login">Войдите, чтобы видеть уведомления.</div></div>
+      <div class="offline"><div class="big">🔔💥</div><b>Уведомления недоступны</b><span>notification-service не отвечает. Заказы и оплата работают, а пропущенные события он обработает после перезапуска — они ждут в базе.</span></div>
+    </section>
+
+    <section class="panel profile" id="profile-panel" data-svc="user">
+      <div class="panel-head"><h3>👤 Профиль</h3><span class="tag">user-service :8002</span></div>
+      <div id="profile"><div class="need-login">Войдите, чтобы видеть профиль.</div></div>
+      <div class="offline"><div class="big">👤💥</div><b>Профиль недоступен</b><span>user-service не отвечает. Покупки при этом работают.</span></div>
+    </section>
+  </div>
+</main>
+
+<section class="journal">
+  <div class="journal-head">
+    <h3>📜 Журнал: кто ответил на запрос</h3>
+    <button class="btn small ghost" id="clear-log">Очистить</button>
+  </div>
+  <div class="log" id="log"></div>
+</section>
+
+<dialog id="auth-dialog">
+  <div class="dlg" id="auth-box">
+    <h3>Вход в ShopHub</h3>
+    <p>Обслуживает <b>auth-service</b> (порт 8001). Токен проверяет каждый сервис сам, поэтому после входа магазин работает даже без auth-service.</p>
+    <div class="tabs">
+      <button type="button" data-tab="login" class="active">Вход</button>
+      <button type="button" data-tab="register">Регистрация</button>
+    </div>
+    <form id="auth-form">
+      <div id="name-field" hidden>
+        <label for="f-name">Имя</label>
+        <input id="f-name" autocomplete="name" placeholder="Анна">
+      </div>
+      <label for="f-email">Email</label>
+      <input id="f-email" type="email" required autocomplete="email" placeholder="anna@example.com">
+      <label for="f-pass">Пароль</label>
+      <input id="f-pass" type="password" required minlength="8" autocomplete="current-password" placeholder="минимум 8 символов">
+      <div class="err" id="auth-err"></div>
+      <div class="actions">
+        <button class="btn" type="submit" id="auth-submit">Войти</button>
+        <button class="btn dark" type="button" id="demo-user">⚡ Демо-покупатель</button>
+      </div>
+    </form>
+    <div class="offline"><div style="font-size:30px">🔐💥</div><b>auth-service недоступен</b><span>Вход и регистрация временно не работают. Уже вошедшие покупатели продолжают пользоваться магазином.</span></div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+// ------------------------------------------------------------------ configuration
+const HOST = location.hostname || "localhost";
+const INTERNAL_TOKEN = "dev-internal-token-change-me"; // only for the demo /chaos/crash endpoint
+const SERVICES = [
+  { key: "auth",         name: "auth-service",         title: "Авторизация", icon: "🔐", port: 8001, role: "вход, регистрация, JWT" },
+  { key: "user",         name: "user-service",         title: "Профили",     icon: "👤", port: 8002, role: "данные покупателей" },
+  { key: "product",      name: "product-service",      title: "Каталог",     icon: "📦", port: 8003, role: "товары и склад" },
+  { key: "order",        name: "order-service",        title: "Заказы",      icon: "🧾", port: 8004, role: "оформление заказов" },
+  { key: "payment",      name: "payment-service",      title: "Оплата",      icon: "💳", port: 8005, role: "платежи и возвраты" },
+  { key: "notification", name: "notification-service", title: "Уведомления", icon: "🔔", port: 8006, role: "сообщения покупателю" },
+];
+const SVC = Object.fromEntries(SERVICES.map(s => [s.key, s]));
+const base = key => `http://${HOST}:${SVC[key].port}`;
+
+// ------------------------------------------------------------------ state
+const state = {
+  status: Object.fromEntries(SERVICES.map(s => [s.key, "unknown"])),
+  latency: {},
+  restartingSince: {},
+  token: null,
+  user: null,
+  products: [],
+  cart: {},          // product_id -> qty (kept in the browser, needs no service)
+  orders: [],
+  payments: {},      // order_id -> payment
+  paymentsKnown: false,
+  notes: { items: [], unread: 0 },
+  profile: null,
+};
+
+const storage = {
+  get(k) { try { return JSON.parse(localStorage.getItem("shophub." + k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem("shophub." + k, JSON.stringify(v)); } catch { /* private mode */ } },
+  del(k) { try { localStorage.removeItem("shophub." + k); } catch { /* ignore */ } },
+};
+
+// ------------------------------------------------------------------ helpers
+const $ = sel => document.querySelector(sel);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = v => new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v) || 0) + " $";
+const now = () => new Date().toLocaleTimeString("ru-RU", { hour12: false });
+
+function emoji(name) {
+  const n = String(name).toLowerCase();
+  const map = [["рюкзак", "🎒"], ["клавиатур", "⌨️"], ["мыш", "🖱️"], ["монитор", "🖥️"], ["наушник", "🎧"],
+               ["ноутбук", "💻"], ["книг", "📘"], ["кружк", "☕"], ["keyboard", "⌨️"], ["mouse", "🖱️"]];
+  for (const [k, e] of map) if (n.includes(k)) return e;
+  return "📦";
+}
+
+let toastTimer;
+function toast(text, kind = "") {
+  const t = $("#toast");
+  t.textContent = text;
+  t.className = "toast show " + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = "toast", 3500);
+}
+
+function log(service, msg, code = "", kind = "ok") {
+  const row = document.createElement("div");
+  row.className = kind;
+  row.innerHTML = `<span class="time">${now()}</span><span class="who">${esc(service)}</span><span class="msg">${esc(msg)}</span><span class="code">${esc(code)}</span>`;
+  const box = $("#log");
+  box.prepend(row);
+  while (box.children.length > 120) box.lastChild.remove();
+}
+
+// One HTTP call to one microservice. Never throws: a dead service is a normal situation here.
+async function api(key, path, { method = "GET", body, quiet = false, timeout = 4000, headers = {} } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  const started = performance.now();
+  const h = { ...headers };
+  if (body !== undefined) h["Content-Type"] = "application/json";
+  if (state.token) h["Authorization"] = "Bearer " + state.token;
+  try {
+    const res = await fetch(base(key) + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), signal: ctrl.signal });
+    const ms = Math.round(performance.now() - started);
+    let data = null;
+    try { data = await res.json(); } catch { /* 204 */ }
+    const error = res.ok ? null : (data && data.error && data.error.message) || res.statusText;
+    if (!quiet) log(SVC[key].name, `${method} ${path}${error ? " — " + error : ""}`, res.status, res.ok ? "ok" : "bad");
+    if (res.status === 401 && state.token && key !== "auth") logout("Сессия истекла, войдите снова");
+    return { ok: res.ok, status: res.status, data, error, ms, down: false };
+  } catch (e) {
+    if (!quiet) log(SVC[key].name, `${method} ${path} — сервис не отвечает`, "✖", "bad");
+    return { ok: false, status: 0, data: null, error: "сервис не отвечает", down: true };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ------------------------------------------------------------------ control room
+function renderServices() {
+  $("#services").innerHTML = SERVICES.map(s => `
+    <div class="svc" id="svc-${s.key}">
+      <div class="top"><span class="ico">${s.icon}</span><div><div class="title">${s.title}</div><div class="cname">${s.name}</div></div></div>
+      <div class="role">${s.role}</div>
+      <div class="state"><span class="dot"></span><span class="label">проверка…</span></div>
+      <div class="meta"><span>:${s.port}</span><span class="lat">—</span><a href="${base(s.key)}/docs" target="_blank" rel="noopener">API ↗</a></div>
+      <button class="crash" data-crash="${s.key}">💥 Уронить</button>
+    </div>`).join("");
+}
+
+function paintService(key) {
+  const el = $("#svc-" + key);
+  const st = state.status[key];
+  el.classList.remove("up", "down", "restarting");
+  if (st !== "unknown") el.classList.add(st);
+  el.querySelector(".label").textContent =
+    st === "up" ? "Работает" : st === "down" ? "Недоступен" : st === "restarting" ? "Docker перезапускает…" : "проверка…";
+  el.querySelector(".lat").textContent = st === "up" && state.latency[key] != null ? state.latency[key] + " мс" : "—";
+  el.querySelector(".crash").disabled = st !== "up";
+
+  // the parts of the shop served by this microservice
+  document.querySelectorAll(`[data-svc="${key}"]`).forEach(p => p.classList.toggle("is-down", st === "down" || st === "restarting"));
+  if (key === "auth") $("#auth-box").classList.toggle("is-down", st === "down" || st === "restarting");
+
+  const upCount = SERVICES.filter(s => state.status[s.key] === "up").length;
+  const sum = $("#summary");
+  sum.textContent = upCount === 6 ? "✅ Работают все 6 из 6" : `⚠️ Работают ${upCount} из 6 — магазин продолжает работать`;
+  sum.className = "summary " + (upCount === 6 ? "all-ok" : "degraded");
+}
+
+async function probe(key) {
+  const res = await api(key, "/health", { quiet: true, timeout: 1500 });
+  const prev = state.status[key];
+  let next;
+  if (res.ok) {
+    state.latency[key] = res.ms;
+    const since = state.restartingSince[key];
+    next = prev === "restarting" && since && Date.now() - since < 2500 ? "restarting" : "up";
+  } else {
+    next = prev === "restarting" ? "restarting" : "down";
+  }
+  if (next === prev) { paintService(key); return; }
+  state.status[key] = next;
+  paintService(key);
+
+  const name = SVC[key].name;
+  if (next === "down") {
+    log(name, "контейнер не отвечает — остальные сервисы работают", "DOWN", "bad");
+    toast(`${name} недоступен. Остальной магазин работает.`, "bad");
+  } else if (next === "up" && prev !== "unknown") {
+    log(name, prev === "restarting" ? "Docker перезапустил контейнер — сервис снова работает" : "сервис снова работает", "UP", "sys");
+    toast(`${name} снова работает ✅`, "ok");
+    delete state.restartingSince[key];
+    refreshFor(key);
+  } else if (next === "up") {
+    refreshFor(key);
+  }
+}
+
+function startProbes() {
+  for (const s of SERVICES) {
+    probe(s.key);
+    setInterval(() => probe(s.key), 1500);
+  }
+}
+
+async function crash(key) {
+  const name = SVC[key].name;
+  const res = await api(key, "/chaos/crash", { method: "POST", headers: { "X-Internal-Token": INTERNAL_TOKEN }, quiet: true });
+  if (!res.ok) { toast(`Не удалось уронить ${name}: ${res.error}`, "bad"); return; }
+  state.status[key] = "restarting";
+  state.restartingSince[key] = Date.now();
+  paintService(key);
+  log(name, "💥 авария: процесс завершился с кодом 1 — Docker поднимет контейнер сам", "CRASH", "bad");
+  toast(`💥 ${name} упал. Смотрите: остальные 5 сервисов работают.`, "bad");
+}
+
+// ------------------------------------------------------------------ data loading
+function refreshFor(key) {
+  if (key === "product") loadProducts();
+  if (key === "order" || key === "payment") loadOrders();
+  if (key === "notification") loadNotes();
+  if (key === "user") loadProfile();
+  if (key === "auth") renderWho();
+}
+
+async function loadProducts() {
+  if (state.status.product === "down") return;
+  const r = await api("product", "/products?limit=100", { quiet: true });
+  if (r.ok) { state.products = r.data.items; renderProducts(); renderCart(); }
+}
+
+async function loadOrders() {
+  if (!state.token) return;
+  if (state.status.order !== "down") {
+    const r = await api("order", "/orders?limit=20", { quiet: true });
+    if (r.ok) state.orders = r.data.items;
+  }
+  const p = state.status.payment === "down" ? { ok: false } : await api("payment", "/payments?limit=50", { quiet: true });
+  state.paymentsKnown = p.ok;
+  if (p.ok) state.payments = Object.fromEntries(p.data.items.map(x => [x.order_id, x]));
+  renderOrders();
+}
+
+async function loadNotes() {
+  if (!state.token || state.status.notification === "down") return;
+  const r = await api("notification", "/notifications?limit=20", { quiet: true });
+  if (r.ok) { state.notes = r.data; renderNotes(); renderWho(); }
+}
+
+async function loadProfile() {
+  if (!state.token || state.status.user === "down") return;
+  const r = await api("user", "/users/me", { quiet: true });
+  if (r.ok) { state.profile = r.data; renderProfile(); }
+}
+
+function loadAll() { loadProducts(); loadOrders(); loadNotes(); loadProfile(); }
+
+// ------------------------------------------------------------------ rendering: shop
+function renderProducts() {
+  const box = $("#products");
+  if (!state.products.length) { box.innerHTML = '<div class="empty">Каталог пуст.</div>'; return; }
+  box.innerHTML = state.products.map(p => `
+    <div class="product">
+      <div class="pic">${emoji(p.name)}</div>
+      <div class="pname">${esc(p.name)}</div>
+      <div class="pdesc">${esc(p.description)}</div>
+      <div class="row"><span class="price">${money(p.price)}</span><span class="stock ${p.stock <= 3 ? "low" : ""}">${p.stock > 0 ? "на складе: " + p.stock : "нет в наличии"}</span></div>
+      <button class="btn small" data-add="${p.id}" ${p.stock > 0 ? "" : "disabled"}>В корзину</button>
+    </div>`).join("");
+}
+
+function renderCart() {
+  const lines = Object.entries(state.cart).filter(([, q]) => q > 0);
+  const byId = Object.fromEntries(state.products.map(p => [p.id, p]));
+  let total = 0;
+  $("#cart-lines").innerHTML = lines.length ? lines.map(([id, q]) => {
+    const p = byId[id] || { name: "Товар №" + id, price: 0 };
+    total += Number(p.price) * q;
+    return `<div class="cart-line"><span>${emoji(p.name)}</span><span class="n">${esc(p.name)}</span>
+      <span class="qty"><button data-dec="${id}">−</button><span>${q}</span><button data-inc="${id}">+</button></span></div>`;
+  }).join("") : '<div class="empty">Корзина пуста — добавьте товары из каталога.</div>';
+  $("#cart-total").textContent = money(total);
+  $("#checkout").disabled = !lines.length;
+  storage.set("cart", state.cart);
+}
+
+const ORDER_STATUS = {
+  pending_payment: ["⏳ ждёт оплаты", "warn"],
+  paid: ["✅ оплачен", "ok"],
+  payment_failed: ["❌ оплата отклонена", "bad"],
+  cancelled: ["🚫 отменён", ""],
+};
+const PAY_STATUS = {
+  completed: ["💳 платёж прошёл", "ok"],
+  failed: ["💳 платёж отклонён", "bad"],
+  refunded: ["↩️ деньги возвращены", ""],
+  cancelled: ["💳 не списывался", ""],
+};
+
+function renderOrders() {
+  const box = $("#orders");
+  if (!state.token) { box.innerHTML = '<div class="need-login">Войдите, чтобы видеть заказы.</div>'; return; }
+  if (!state.orders.length) { box.innerHTML = '<div class="empty">Заказов пока нет.</div>'; return; }
+  box.innerHTML = state.orders.map(o => {
+    const [st, cls] = ORDER_STATUS[o.status] || [o.status, ""];
+    const pay = state.payments[o.id];
+    let payChip;
+    if (!state.paymentsKnown) payChip = '<span class="chip off">💳 payment-service недоступен</span>';
+    else if (pay) { const [t, c] = PAY_STATUS[pay.status] || [pay.status, ""]; payChip = `<span class="chip ${c}" title="${esc(pay.failure_reason || pay.transaction_id || "")}">${t}</span>`; }
+    else payChip = '<span class="chip warn">💳 в обработке…</span>';
+    const items = o.items.map(i => `${esc(i.product_name)} × ${i.quantity}`).join(", ");
+    const cancel = o.status !== "cancelled" ? `<button class="link" data-cancel="${o.id}">отменить</button>` : "";
+    return `<div class="order">
+      <div class="o-top"><span class="o-id">Заказ №${o.id}</span><b>${money(o.total_amount)}</b></div>
+      <div class="o-items">${items}</div>
+      <div class="o-bottom"><span class="chip ${cls}">${st}</span>${payChip}${cancel}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderNotes() {
+  const box = $("#notes");
+  if (!state.token) { box.innerHTML = '<div class="need-login">Войдите, чтобы видеть уведомления.</div>'; return; }
+  const items = state.notes.items || [];
+  box.innerHTML = items.length ? items.slice(0, 8).map(n => `
+    <div class="note ${n.is_read ? "read" : ""}" data-read="${n.is_read ? "" : n.id}">
+      <div class="s">${esc(n.subject)}</div><div class="m">${esc(n.message)}</div>
+      <div class="t">${new Date(n.created_at).toLocaleTimeString("ru-RU", { hour12: false })} · ${esc(n.event_type)}</div>
+    </div>`).join("") : '<div class="empty">Уведомлений пока нет.</div>';
+}
+
+function renderProfile() {
+  const box = $("#profile");
+  if (!state.token) { box.innerHTML = '<div class="need-login">Войдите, чтобы видеть профиль.</div>'; return; }
+  const p = state.profile;
+  if (!p) { box.innerHTML = '<div class="empty">Загрузка…</div>'; return; }
+  box.innerHTML = `<dl><dt>Имя</dt><dd>${esc(p.full_name)}</dd><dt>Email</dt><dd>${esc(p.email)}</dd>
+    <dt>Адрес</dt><dd>${esc(p.address || "—")}</dd></dl>
+    <form id="addr-form"><input id="addr" placeholder="Адрес доставки" value="${esc(p.address || "")}"><button class="btn small" type="submit">Сохранить</button></form>`;
+}
+
+function renderWho() {
+  const box = $("#who");
+  if (!state.user) {
+    box.innerHTML = '<button class="btn" id="open-login">Войти</button>';
+    return;
+  }
+  const unread = state.notes.unread || 0;
+  box.innerHTML = `<button class="bell" id="bell" title="Уведомления">🔔${unread ? `<span class="count">${unread}</span>` : ""}</button>
+    <span>👋 <span class="name">${esc(state.user.email)}</span></span>
+    <button class="btn small ghost" id="logout">Выйти</button>`;
+}
+
+// ------------------------------------------------------------------ actions
+async function checkout() {
+  const items = Object.entries(state.cart).filter(([, q]) => q > 0).map(([id, q]) => ({ product_id: Number(id), quantity: q }));
+  if (!state.token) { openLogin(); return; }
+  if (!items.length) return;
+  $("#checkout").disabled = true;
+  const r = await api("order", "/orders", { method: "POST", body: { items } });
+  if (r.ok) {
+    state.cart = {};
+    renderCart();
+    toast(`Заказ №${r.data.id} принят. Оплата идёт асинхронно через событие в базе…`, "ok");
+    if (state.status.payment !== "up") log("order-service", `заказ №${r.data.id} ждёт оплаты: payment-service недоступен, событие лежит в bus.events`, "", "sys");
+    loadOrders(); loadProducts();
+  } else {
+    toast(r.down ? "order-service недоступен — корзина сохранена" : `Не удалось оформить: ${r.error}`, "bad");
+  }
+  renderCart();
+}
+
+async function cancelOrder(id) {
+  const r = await api("order", `/orders/${id}/cancel`, { method: "POST" });
+  if (r.ok) { toast(`Заказ №${id} отменён`); loadOrders(); loadProducts(); }
+  else toast(`Не удалось отменить: ${r.error}`, "bad");
+}
+
+async function saveAddress(address) {
+  const r = await api("user", "/users/me", { method: "PATCH", body: { address } });
+  if (r.ok) { state.profile = r.data; renderProfile(); toast("Адрес сохранён", "ok"); }
+  else toast(`Не удалось сохранить: ${r.error}`, "bad");
+}
+
+function setSession(token, user) {
+  state.token = token;
+  state.user = user;
+  storage.set("session", { token, user });
+  renderWho();
+  loadAll();
+}
+
+function logout(msg) {
+  state.token = null; state.user = null; state.orders = []; state.notes = { items: [], unread: 0 }; state.profile = null;
+  storage.del("session");
+  renderWho(); renderOrders(); renderNotes(); renderProfile();
+  if (msg) toast(msg);
+}
+
+// ------------------------------------------------------------------ login dialog
+let mode = "login";
+function openLogin() { $("#auth-err").textContent = ""; $("#auth-dialog").showModal(); }
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === m));
+  $("#name-field").hidden = m !== "register";
+  $("#auth-submit").textContent = m === "register" ? "Зарегистрироваться" : "Войти";
+}
+
+async function doAuth(email, password, fullName, register) {
+  $("#auth-err").textContent = "";
+  if (register) {
+    const r = await api("auth", "/auth/register", { method: "POST", body: { email, password, full_name: fullName || email.split("@")[0] } });
+    if (!r.ok) { $("#auth-err").textContent = r.error; return false; }
+  }
+  const r = await api("auth", "/auth/login", { method: "POST", body: { email, password } });
+  if (!r.ok) { $("#auth-err").textContent = r.error; return false; }
+  setSession(r.data.access_token, r.data.user);
+  $("#auth-dialog").close();
+  toast(register ? "Аккаунт создан, добро пожаловать!" : "Вы вошли", "ok");
+  return true;
+}
+
+// ------------------------------------------------------------------ events
+document.addEventListener("click", e => {
+  const t = e.target.closest("button, [data-read]");
+  if (!t) return;
+  if (t.dataset.crash) crash(t.dataset.crash);
+  else if (t.dataset.add) { state.cart[t.dataset.add] = (state.cart[t.dataset.add] || 0) + 1; renderCart(); }
+  else if (t.dataset.inc) { state.cart[t.dataset.inc]++; renderCart(); }
+  else if (t.dataset.dec) { state.cart[t.dataset.dec]--; if (state.cart[t.dataset.dec] <= 0) delete state.cart[t.dataset.dec]; renderCart(); }
+  else if (t.dataset.cancel) cancelOrder(t.dataset.cancel);
+  else if (t.dataset.tab) setMode(t.dataset.tab);
+  else if (t.dataset.read) { api("notification", `/notifications/${t.dataset.read}/read`, { method: "POST" }).then(loadNotes); }
+  else if (t.id === "checkout") checkout();
+  else if (t.id === "open-login") openLogin();
+  else if (t.id === "logout") logout("Вы вышли");
+  else if (t.id === "bell") $("#notes-panel").scrollIntoView({ behavior: "smooth" });
+  else if (t.id === "clear-log") $("#log").innerHTML = "";
+  else if (t.id === "demo-user") {
+    const id = Math.random().toString(36).slice(2, 7);
+    doAuth(`buyer-${id}@example.com`, "Secret123!", "Покупатель " + id.toUpperCase(), true);
+  }
+});
+
+document.addEventListener("submit", e => {
+  e.preventDefault();
+  if (e.target.id === "auth-form") doAuth($("#f-email").value.trim(), $("#f-pass").value, $("#f-name").value.trim(), mode === "register");
+  if (e.target.id === "addr-form") saveAddress($("#addr").value.trim());
+});
+
+$("#auth-dialog").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
+// ------------------------------------------------------------------ start
+renderServices();
+state.cart = storage.get("cart") || {};
+const saved = storage.get("session");
+if (saved && saved.token) { state.token = saved.token; state.user = saved.user; }
+renderWho(); renderCart(); renderOrders(); renderNotes(); renderProfile();
+log("браузер", "страница открыта: связь с 6 микросервисами напрямую, порты 8001–8006", "", "sys");
+startProbes();
+loadAll();
+setInterval(loadProducts, 4000);
+setInterval(loadOrders, 2000);
+setInterval(loadNotes, 2500);
+setInterval(loadProfile, 10000);
+</script>
+</body>
+</html>

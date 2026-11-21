@@ -1,322 +1,221 @@
 # ShopHub — Microservice Online Store (Lab 2)
 
-A backend for an online store built as **6 independent business microservices** plus an
-**API Gateway**. Python 3.12 + FastAPI, a separate PostgreSQL container for every service, RabbitMQ
-(asynchronous events), all of it run with Docker Compose.
+An electronics store backend built from **6 independent microservices running in 6 Docker containers**,
+sharing **one PostgreSQL database** (with a separate schema and login role per service), plus a web UI that
+shows live what happens when a service fails.
 
 ```
-                               Client
-                                 │  HTTP :8080
-                        ┌────────▼─────────┐
-                        │   API Gateway    │  routing · JWT check · roles · rate limit
-                        │                  │  aggregation · request-id · access logs
-                        └──┬───┬───┬───┬───┬──┬──────────────┐
-             REST          │   │   │   │   │  │              │
-      ┌────────────────────┘   │   │   │   │  └───────┐      │
-      ▼              ┌─────────┘   │   │   └────┐     ▼      ▼
-┌───────────┐ REST ┌─▼─────────┐ ┌─▼───────┐ ┌──▼──────┐ ┌──────────┐ ┌──────────────┐
-│   Auth    ├─────►│   User    │ │ Product │◄┤  Order  │ │ Payment  │ │ Notification │
-│  Service  │      │  Service  │ │ Service │ │ Service │ │ Service  │ │   Service    │
-└──┬────┬───┘      └─────┬─────┘ └──┬───┬──┘ └─┬────┬──┘ └─┬────┬───┘ └──────┬────┬──┘
-   │    │                │          │   │      │    │      │    │            │    │
-   ▼    │                ▼          ▼   │      ▼    │      ▼    │            ▼    │
-auth_db │             user_db  product_db│  order_db │  payment_db│   notification_db│
-        │                                │           │            │                 │
-        └───────────────┬────────────────┴───────────┴────────────┴─────────────────┘
-                        ▼
-              ┌─────────────────────┐
-              │ RabbitMQ (topic     │  user.registered, order.created, order.cancelled,
-              │ exchange shop.events│  payment.completed, payment.failed, payment.refunded,
-              │ + dead-letter queues│  product.low_stock
-              └─────────────────────┘
+                         Browser: frontend/index.html
+          (shop + live "control room" with the state of every microservice)
+                                     │ REST (each service directly)
+   ┌──────────┬──────────┬──────────┼──────────┬──────────┬──────────────┐
+   ▼          ▼          ▼          ▼          ▼          ▼              │
+┌──────┐  ┌──────┐  ┌─────────┐  ┌───────┐  ┌─────────┐  ┌──────────────┐
+│ auth │─►│ user │  │ product │◄─│ order │  │ payment │  │ notification │   6 containers
+│:8001 │  │:8002 │  │  :8003  │  │ :8004 │  │  :8005  │  │    :8006     │
+└──┬───┘  └──┬───┘  └────┬────┘  └───┬───┘  └────┬────┘  └──────┬───────┘
+   │         │           │           │           │              │
+   ▼         ▼           ▼           ▼           ▼              ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ PostgreSQL — ONE database "shophub" (installed locally, outside Docker)    │
+│  schemas: auth │ users │ products │ orders │ payments │ notifications      │
+│  bus.events  ← asynchronous events between services (order.created, ...)   │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-More detail (sequence diagrams, event catalog, design decisions): [docs/architecture.md](docs/architecture.md).
+Architecture details: [docs/architecture.md](docs/architecture.md). Step-by-step demo guide (Russian):
+[docs/DEMO_RU.md](docs/DEMO_RU.md).
 
 ## Services
 
-| Service | Responsibility | DB | Sync API (REST) | Events |
-|---|---|---|---|---|
-| **auth-service** | Credentials, password hashing (PBKDF2), JWT issuing, bootstrap admin | `auth_db` | `/auth/*` | publishes `user.registered` |
-| **user-service** | Customer profiles (name, phone, address) | `user_db` | `/users/*`, internal `/internal/users` | — |
-| **product-service** | Catalog, stock, atomic stock reservation | `product_db` | `/products/*`, internal `/internal/stock/*` | publishes `product.low_stock` |
-| **order-service** | Order lifecycle, saga coordination | `order_db` | `/orders/*` | publishes `order.created`, `order.cancelled`; consumes `payment.*` |
-| **payment-service** | Charges / refunds through a (simulated) payment provider | `payment_db` | `/payments/*` | consumes `order.*`; publishes `payment.completed/failed/refunded` |
-| **notification-service** | Turns domain events into user notifications (email-channel stub) | `notification_db` | `/notifications/*` | consumes `user.registered`, `order.*`, `payment.*`, `product.low_stock` |
-| api-gateway *(infrastructure)* | Single entry point, see below | — | `/api/*` | — |
+| # | Service | Container / port | Responsibility | Schema (tables) | Events |
+|---|---|---|---|---|---|
+| 1 | **auth-service** | `auth-service` :8001 | registration, login, password hashing (PBKDF2), JWT | `auth` (credentials) | publishes `user.registered` |
+| 2 | **user-service** | `user-service` :8002 | customer profiles | `users` (profiles) | — |
+| 3 | **product-service** | `product-service` :8003 | catalog, stock, atomic stock reservation | `products` (products) | publishes `product.low_stock` |
+| 4 | **order-service** | `order-service` :8004 | order lifecycle (saga) | `orders` (orders, order_items) | publishes `order.*`; consumes `payment.*` |
+| 5 | **payment-service** | `payment-service` :8005 | charges / refunds via a simulated provider | `payments` (payments) | consumes `order.*`; publishes `payment.*` |
+| 6 | **notification-service** | `notification-service` :8006 | turns events into user notifications | `notifications` (notifications) | consumes `user.registered`, `order.*`, `payment.*` |
 
-Each service has its own code package, `Dockerfile`, configuration (`Settings` class plus `.env.example`),
-database and Swagger UI. It can be built, started and scaled on its own. `libs/common` is a small
-shared **infrastructure** library (logging, error model, JWT helpers, DB/broker plumbing) and has **no
-business logic**.
+Every service has its own code package, `Dockerfile`, configuration (`Settings` class + `.env.example`), API
+with Swagger UI, business logic, error handling and structured logging. `libs/common` is a small shared
+**infrastructure** library (logging, errors, JWT, DB and event-bus plumbing) with no business logic.
+
+### Why one database (and how the services stay separated)
+
+The lab allows a shared database when the choice is justified. Here it is:
+
+* **Simple to run.** One PostgreSQL server (already installed locally) instead of six, and only 6 containers in Docker.
+* **Logical isolation is kept.** Every service has its own **schema** and **login role**, and a role can access only
+  its own schema (`permission denied` otherwise; `scripts/show-db.ps1` shows this). No service reads another
+  service's tables. Data from other services is obtained only through their API or events.
+* **One less moving part.** The database also carries the event bus (`bus.events`), so no separate message broker is needed.
+* **Can be split later.** Moving a schema to its own server only means changing that service's `DATABASE_URL`.
+
+Trade-off: the database is a shared dependency. If PostgreSQL itself is down, all services lose their data
+(each one stays alive and reports `503`). Failures of the **services** are fully isolated, and that is what the demo shows.
 
 ### Interaction between services
 
-* **Synchronous (REST over HTTP)**, used when the caller needs the answer right away:
-  * `auth → user`: create the profile while the user registers. If user-service fails, the
-    registration is rolled back.
-  * `order → product`: reserve stock (all-or-nothing) before an order is accepted, and release it on
-    cancellation or failed payment.
-  * `gateway → order + payment`: response aggregation (`GET /api/orders/{id}/summary`).
-* **Asynchronous (RabbitMQ)**, used when the work can happen later and should not couple services:
+* **Synchronous (REST):**
+  * `auth → user` creates the profile during registration; registration is rolled back if this fails;
+  * `order → product` reserves stock (all-or-nothing) before an order is accepted and releases it on cancellation or failed payment.
+* **Asynchronous (events through PostgreSQL):** a producer inserts a row into `bus.events`; each consumer reads
+  new events in order and stores its position in `bus.consumer_offsets`. Events wait in the table while a
+  consumer is down, and it catches up when it restarts.
   * `order.created → payment-service` charges the order → `payment.completed | payment.failed → order-service`
-    (status `paid` / `payment_failed` + stock released) **and** `notification-service`.
+    (order becomes `paid` / `payment_failed` + stock released) **and** `notification-service`.
   * `order.cancelled → payment-service` (refund) and `notification-service`.
   * `user.registered → notification-service` (welcome message).
 
-Internal endpoints (`/internal/*`) need a shared service token (`X-Internal-Token`). The gateway strips that
-header from client requests, so clients can never reach them.
+Internal endpoints (`/internal/*`, `/chaos/*`) require the shared service token `X-Internal-Token`.
 
 ## Technology choices
 
 | Area | Choice | Why |
 |---|---|---|
-| Language / framework | **Python 3.12 + FastAPI** | async I/O (many service-to-service calls), pydantic validation, OpenAPI/Swagger generated automatically |
-| Database | **PostgreSQL 16**, a separate container (`<name>-db`) with its own volume per service | ACID transactions for stock and payments; a database failure or migration affects only its own service |
-| ORM | **SQLAlchemy 2 (async) + asyncpg** | mature, async, the same models run on SQLite in tests |
-| Messaging | **RabbitMQ** (topic exchange) via aio-pika | routing by event type (`order.*`), durable queues, ack/reject, dead-letter queues; simpler to run than Kafka for this scale |
+| Language / framework | **Python 3.12 + FastAPI** | async I/O, pydantic validation, OpenAPI/Swagger generated automatically |
+| Database | **PostgreSQL** (one database, schema + role per service) | ACID transactions for stock and payments; schemas and roles keep the services isolated |
+| ORM / driver | **SQLAlchemy 2 (async) + asyncpg** | mature and async; the same models run on SQLite in tests |
+| Messaging | **event table in PostgreSQL** (`bus.events` + consumer offsets) | durable, ordered, at-least-once delivery with no extra broker container; events survive restarts of any service |
 | Sync communication | **REST + httpx** | simple, debuggable, documented with OpenAPI |
-| Auth | **JWT (HS256, PyJWT)** | stateless: the gateway and every service verify the token locally with no extra call to auth-service |
-| Deployment | **Docker Compose** | one command starts 14 containers with health checks, startup order and automatic restart |
-| Tests | **pytest + pytest-asyncio + httpx ASGITransport** | the whole system runs in-process, with no Docker needed |
+| Auth | **JWT (HS256)** | stateless: every service verifies the token itself, so logged-in users keep working even when auth-service is down |
+| Deployment | **Docker Compose** | one command starts the 6 containers with health checks and automatic restart |
+| UI | **one static HTML file** (vanilla JS) | no build step; talks to each service directly, so there is no single point of failure in front of them |
+| Tests | **pytest + httpx ASGITransport** | the whole system runs in-process without Docker |
 
 ## Quick start
 
-```bash
-cp .env.example .env            # optional: change secrets
-docker compose up -d --build    # 6 services + 6 databases + rabbitmq + gateway = 14 containers
-curl http://localhost:8080/ready
+Requirements: Docker Desktop, a local PostgreSQL (tested with 16 and 18), Windows PowerShell.
+
+```powershell
+cd lab2
+# 1. once: create the database "shophub" in the local PostgreSQL (asks for the postgres password)
+powershell -ExecutionPolicy Bypass -File scripts\setup-database.ps1
+# 2. start the 6 microservices
+docker compose up -d --build
+docker compose ps            # 6 containers, all "healthy"
+# 3. open the UI
+start frontend\index.html
 ```
+
+If the UI cannot reach the services when opened as a file, serve it over HTTP instead:
+`python -m http.server 5500 --directory frontend`, then open http://localhost:5500.
 
 | URL | What |
 |---|---|
-| http://localhost:8080 | API Gateway (entry point for clients) |
-| http://localhost:8080/docs | Gateway Swagger UI (aggregation endpoint) |
-| http://localhost:8001/docs … :8006/docs | Swagger UI of auth, user, product, order, payment, notification |
-| http://localhost:15672 | RabbitMQ management UI (`shop` / `shop`) |
+| `frontend/index.html` | the shop + control room (main demo) |
+| http://localhost:8001/docs … http://localhost:8006/docs | Swagger UI of each microservice |
 
-### Databases (PostgreSQL 16, one container per service)
+Default administrator: `admin@example.com` / `Admin12345!`. The catalog is seeded with 8 demo products.
+A PostgreSQL that is not on `localhost:5432` can be selected with `DB_HOST` / `DB_PORT`, for example
+`$env:DB_PORT=5433; docker compose up -d`.
 
-| Service | Container | Host port | Database | User / password |
-|---|---|---|---|---|
-| auth | `auth-db` | 5433 | `auth_db` | `auth_svc` / `auth_pass` |
-| user | `user-db` | 5434 | `user_db` | `user_svc` / `user_pass` |
-| product | `product-db` | 5435 | `product_db` | `product_svc` / `product_pass` |
-| order | `order-db` | 5436 | `order_db` | `order_svc` / `order_pass` |
-| payment | `payment-db` | 5437 | `payment_db` | `payment_svc` / `payment_pass` |
-| notification | `notification-db` | 5438 | `notification_db` | `notification_svc` / `notification_pass` |
+## Fault isolation demo
 
-Tables are created by the services on startup. Open them in pgAdmin/DBeaver with the values above, or
-print all six databases with:
+**In the UI:** every microservice has a card with a live status and a **💥 Уронить** (crash) button. The button calls
+`POST /chaos/crash`, and the service process exits with code 1, like a real crash. Then:
+
+* only the parts of the shop served by that service turn red ("сервис недоступен — остальной магазин работает");
+* the other 5 cards stay green and the shop keeps working;
+* Docker restarts the crashed container by itself (`restart: unless-stopped`), and the card turns green again;
+* an order placed while payment-service is down is accepted as `pending_payment` and becomes `paid` automatically
+  after the service is back, because the event waited in `bus.events`.
+
+**From the terminal:**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1
+docker compose stop payment-service                               # switch one service off
+docker compose start payment-service
+docker compose up -d --build --no-deps --force-recreate order-service   # redeploy only one service
+powershell -ExecutionPolicy Bypass -File scripts\failover-demo.ps1 -Scenario all -Pause
+powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1      # what is stored in the database
 ```
 
-Port 5432 is left free on purpose, so a locally installed PostgreSQL does not conflict.
+| Down | Unavailable (clean error) | Still works |
+|---|---|---|
+| auth-service | login, registration | everything else; existing sessions stay valid |
+| user-service | profile | catalog, cart, orders, payments, notifications |
+| product-service | catalog, placing new orders | cart, existing orders, payments, notifications, profile |
+| order-service | placing / viewing orders | catalog, cart (kept in the browser), payments, notifications, profile |
+| payment-service | payment status | everything else; new orders wait as `pending_payment` and get paid after restart |
+| notification-service | notifications | everything else; missed events are processed after restart |
 
-The direct service ports (8001–8006) are published only for documentation and debugging. In production only
-the gateway would be exposed.
+## Main API endpoints
 
-A default administrator is created at startup: `admin@example.com` / `Admin12345!`
-(set `ADMIN_EMAIL` / `ADMIN_PASSWORD`). The catalog is seeded with 5 demo products.
+| Method | Service | Path | Auth | Description |
+|---|---|---|---|---|
+| POST | auth :8001 | `/auth/register` | public | register a customer (creates the profile in user-service) |
+| POST | auth :8001 | `/auth/login` | public | get a JWT |
+| GET | auth :8001 | `/auth/me` | user | identity from the token |
+| GET / PATCH | user :8002 | `/users/me` | user | own profile |
+| GET | user :8002 | `/users/{id}`, `/users` | self or admin / admin | profiles |
+| GET | product :8003 | `/products?search=&category=` | public | catalog |
+| GET | product :8003 | `/products/{id}` | public | product details |
+| POST / PATCH / DELETE | product :8003 | `/products`, `/products/{id}` | admin | manage catalog |
+| POST | order :8004 | `/orders` | user | place an order |
+| GET | order :8004 | `/orders`, `/orders/{id}` | owner or admin | orders |
+| POST | order :8004 | `/orders/{id}/cancel` | owner or admin | cancel (stock released, payment refunded) |
+| GET | payment :8005 | `/payments`, `/payments/order/{order_id}` | owner or admin | payments |
+| GET | notification :8006 | `/notifications` | user | own notifications |
+| POST | notification :8006 | `/notifications/{id}/read` | owner | mark as read |
+| GET | every service | `/health`, `/ready` | public | liveness / readiness (database, event bus) |
+| POST | every service | `/chaos/crash` | internal token | demo only: crash the process (`CHAOS_ENABLED=true`) |
 
-### Example session (through the gateway)
-
-```bash
-# register + login
-curl -X POST localhost:8080/api/auth/register -H "Content-Type: application/json" \
-     -d '{"email":"alice@example.com","password":"Secret123!","full_name":"Alice"}'
-TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H "Content-Type: application/json" \
-     -d '{"email":"alice@example.com","password":"Secret123!"}' | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-
-# browse catalog (public) and order
-curl localhost:8080/api/products
-curl -X POST localhost:8080/api/orders -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-     -d '{"items":[{"product_id":1,"quantity":2}]}'
-
-# a moment later: order is "paid", payment "completed", notifications created
-curl localhost:8080/api/orders/1/summary -H "Authorization: Bearer $TOKEN"
-curl localhost:8080/api/notifications   -H "Authorization: Bearer $TOKEN"
-```
-
-## Main API endpoints (via gateway `/api/...`)
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/api/auth/register` | public | Register a customer (creates the profile in user-service) |
-| POST | `/api/auth/login` | public | Get a JWT access token |
-| GET | `/api/auth/me` | user | Identity from the token |
-| GET | `/api/users/me` | user | Own profile |
-| PATCH | `/api/users/me` | user | Update name / phone / address |
-| GET | `/api/users/{id}` | self or admin | Profile by id |
-| GET | `/api/users` | admin | List profiles |
-| GET | `/api/products?search=&category=&limit=&offset=` | public | Browse the catalog |
-| GET | `/api/products/{id}` | public | Product details |
-| POST | `/api/products` | admin | Create product |
-| PATCH / DELETE | `/api/products/{id}` | admin | Update / delete product |
-| POST | `/api/orders` | user | Place an order (stock reserved, payment async) |
-| GET | `/api/orders?status=` | user | Own orders (admin: all) |
-| GET | `/api/orders/{id}` | owner or admin | Order details |
-| POST | `/api/orders/{id}/cancel` | owner or admin | Cancel (stock released, payment refunded) |
-| GET | `/api/orders/{id}/summary` | owner or admin | **Gateway aggregation**: order + payment |
-| GET | `/api/payments` | user | Own payments (admin: all) |
-| GET | `/api/payments/order/{order_id}` | owner or admin | Payment of an order |
-| GET | `/api/notifications?unread_only=` | user | Own notifications |
-| POST | `/api/notifications/{id}/read` | owner | Mark as read |
-| GET | `/health`, `/ready` | public | Liveness / readiness on **every** service and the gateway |
-
-The full OpenAPI specs are exported to [docs/openapi/](docs/openapi/). The live Swagger UI is at `/docs` of each service.
-
-### Order statuses
-
-```
-pending_payment ──payment.completed──► paid ──cancel──► cancelled (refund)
-       │
-       ├──payment.failed──► payment_failed (stock released) ──cancel──► cancelled
-       └──cancel──► cancelled (stock released, never charged)
-```
+OpenAPI specs are exported to [docs/openapi/](docs/openapi/).
 
 ## Cross-cutting concerns
 
-### Authentication & authorization
-* auth-service issues JWTs (`sub`, `email`, `role`, `exp`, `iss`). Passwords are hashed with PBKDF2-HMAC-SHA256 and a per-user salt.
-* **Gateway**: rejects missing, invalid or expired tokens (except on public routes) and enforces coarse role rules
-  (only `admin` may modify the catalog or list users).
-* **Services** check the token again (zero trust inside the network) and apply fine-grained rules, such as
-  ownership of orders, payments and notifications. Another user's order returns `404`, so its existence is not revealed.
-* Service-to-service endpoints need `X-Internal-Token`.
+**Authentication / authorization.** auth-service issues JWTs (`sub`, `email`, `role`, `exp`, `iss`). Each service
+verifies the token and applies its own rules: admins manage the catalog, and users see only their own orders,
+payments and notifications (another user's order returns `404`). Internal endpoints need `X-Internal-Token`.
 
-### Error handling
-Every error has the same shape and never contains a stack trace:
+**Error handling.** One error format everywhere, never a stack trace:
 
 ```json
-{"error": {"code": "insufficient_stock", "message": "Insufficient stock for 'Pen': requested 5, available 1",
-           "request_id": "7c3e...", "details": null}}
+{"error": {"code": "insufficient_stock", "message": "Insufficient stock for ...", "request_id": "7c3e..."}}
 ```
 
-| Situation | HTTP | code |
-|---|---|---|
-| Invalid input (pydantic) | 422 | `validation_error` (+ `details` per field) |
-| Resource missing | 404 | `not_found` |
-| Missing / invalid / expired token | 401 | `unauthorized`, `invalid_token`, `token_expired` |
-| Not enough rights | 403 | `forbidden` |
-| Business conflict | 409 | `email_taken`, `insufficient_stock`, `already_cancelled` |
-| Rate limit | 429 | `rate_limited` (+ `Retry-After`) |
-| Dependent service down / 5xx | 502 | `upstream_unavailable`, `upstream_error` |
-| Dependent service timeout | 504 | `upstream_timeout` |
-| Database error | 503 | `database_error` |
-| Anything unexpected | 500 | `internal_error` (details only in logs) |
+`422 validation_error`, `404 not_found`, `401 unauthorized / invalid_token / token_expired`, `403 forbidden`,
+`409 conflict / insufficient_stock`, `502 upstream_unavailable`, `504 upstream_timeout`, `503 database_error`,
+`500 internal_error`. Outgoing calls have timeouts; connection errors are retried; failed steps are compensated
+(stock is released, a registration is rolled back); event consumers are idempotent and retry failed events.
 
-Resilience: timeouts on every outgoing call, retries for connection errors (when the request was never sent),
-compensation actions (a failed order rolls back its stock reservation, a failed profile creation rolls back
-the registration), idempotent consumers (unique `order_id` / `event_id`), dead-letter queues for poison
-messages, and retries on startup while Postgres or RabbitMQ are not ready yet.
+**Logging.** Structured JSON on stdout (`docker compose logs -f order-service`) with `timestamp`, `service`,
+`level`, `request_id`, `message` and extra fields. The request id is passed on in HTTP headers **and inside
+events**, so one purchase can be traced across order → payment → notification.
 
-### Logging
-Structured JSON logs on stdout (`docker compose logs -f order-service`):
+**Configuration.** Each service has a pydantic `Settings` class that reads environment variables (see
+`services/<name>/.env.example`). Docker Compose sets them per container. Secrets come from the root `.env`.
 
-```json
-{"timestamp": "2026-11-19T21:04:06.895+00:00", "service": "order-service", "level": "INFO",
- "request_id": "814620ae28514f97817173fac34ee924", "logger": "order_service",
- "message": "order created", "order_id": 1, "user_id": 2, "total": "25.00"}
-```
-
-The `X-Request-ID` comes from the client or is generated by the gateway. It is passed on with every HTTP call
-**and inside every event**, so one purchase can be traced across gateway → order → payment → notification
-with a single id. It is also returned to the client in the `X-Request-ID` response header.
-
-### Configuration management
-Each service has a `Settings` class (pydantic-settings) that reads environment variables or `.env`.
-See `services/<name>/.env.example` for every option. `docker-compose.yml` sets the values for the
-containers. Secrets (`JWT_SECRET`, `INTERNAL_TOKEN`, passwords) come from the root `.env`.
-
-### Health checks
-* `GET /health`: liveness, the process is up.
-* `GET /ready`: readiness, with the dependencies checked: `{"checks": {"database": true, "message_broker": true}}`.
-  The gateway's `/ready` checks every upstream service. It returns `503` when a dependency is down.
-* Docker health checks use `/health`. Each service waits only for its own database and RabbitMQ (`depends_on: service_healthy`), never for another service.
-
-## Fault isolation: one service down, the rest keep working
-
-**6 microservices, 14 containers.** Every microservice is a pair of containers that belongs only to it:
-
-| Microservice | Application container | Own database container | Port |
-|---|---|---|---|
-| auth | `auth-service` | `auth-db` | 8001 |
-| user | `user-service` | `user-db` | 8002 |
-| product | `product-service` | `product-db` | 8003 |
-| order | `order-service` | `order-db` | 8004 |
-| payment | `payment-service` | `payment-db` | 8005 |
-| notification | `notification-service` | `notification-db` | 8006 |
-
-Plus `rabbitmq` (message broker) and `api-gateway` (entry point). These two are infrastructure, not microservices.
-
-Isolation measures:
-
-* **No startup dependencies between services.** A service waits only for its own DB and the broker.
-* **Database per container.** Stopping or breaking `payment-db` affects only payment-service.
-* **`restart: unless-stopped`.** A crashed service process is restarted by Docker automatically.
-* **Timeouts and clean errors.** Calls to a dead service fail fast with `502`/`503`/`504`. Nothing hangs and nothing cascades.
-* **Asynchronous events.** RabbitMQ keeps the events for a service that is down. Failed handlers are retried
-  every 5 s, for example while the service's database is down, and nothing is lost.
-* **Stateless JWT.** Every service verifies tokens itself, so logged-in users keep working even when auth-service is down.
-
-### Demo script
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scriptsailover-demo.ps1 -Scenario all
-powershell -ExecutionPolicy Bypass -File scriptsailover-demo.ps1 -Scenario crash -Service payment-service -Pause
-```
-
-| Scenario | What it does |
-|---|---|
-| `stop` | `docker compose stop <service>`: the service container is switched off |
-| `crash` | `POST /chaos/crash` kills the service process (exit code 1); Docker restarts it on its own |
-| `database` | `docker compose stop <name>-db`: only that service answers `503`, the rest keep working |
-| `update` | `docker compose up -d --build --no-deps --force-recreate <service>`: only that container is replaced |
-
-The crash endpoint exists only when `CHAOS_ENABLED=true` (it is on in `docker-compose.yml` for the demo) and
-needs `X-Internal-Token`. It is not reachable through the gateway.
-
-What happens when a service is down (checked on the real stack):
-
-| Down | Fails (clean `502 upstream_unavailable`) | Still works |
-|---|---|---|
-| auth-service | login / register | everything else: issued JWTs stay valid because services verify them locally |
-| user-service | profile endpoints, registration | login, catalog, orders, payments, notifications |
-| product-service | catalog, placing new orders | login, profiles, existing orders, payments, notifications |
-| order-service | order endpoints | login, profiles, catalog, payments, notifications |
-| payment-service | payment endpoints | everything else; new orders are accepted as `pending_payment`, `order.created` waits in RabbitMQ and the order becomes `paid` as soon as payment-service is back |
-| notification-service | notification endpoints | everything else, including ordering and paying; missed events wait in RabbitMQ and are turned into notifications after the restart |
-| `<name>-db` | only that service's endpoints (`503 database_error`) | all other services; the service itself stays alive and recovers when its DB is back |
-
-A step-by-step demo guide in Russian is in [docs/DEMO_RU.md](docs/DEMO_RU.md).
+**Health checks.** `GET /health` (process alive) and `GET /ready` (database and event bus reachable). Docker uses
+`/health` for container health and restarts crashed containers.
 
 ## Tests
 
-```bash
+```powershell
 pip install -r requirements-dev.txt
-pytest                       # 53 unit + integration tests, no Docker needed (~6 s)
-docker compose up -d --build
-pytest -m e2e                # smoke test against the real stack (PostgreSQL + RabbitMQ)
+pytest                   # 47 unit + integration tests, no Docker or PostgreSQL needed
+pytest -m e2e            # purchase flow against the running containers + PostgreSQL
 ```
 
-* `tests/unit/` has the tests for each service: business rules, validation, authorization, idempotency,
-  timeouts and upstream failures, and the gateway policies (routing, auth, rate limiting, header stripping).
-* `tests/integration/` runs **all 6 services and the gateway in-process**. Services call each other through
-  `httpx.ASGITransport` and share an in-memory event bus that follows RabbitMQ's topic rules. The tests cover
-  the full purchase, a failed payment, a cancellation with refund, and data isolation between users.
-* `tests/e2e/` runs the same purchase flow against the real Docker stack. It is skipped if the stack is not running.
+* `tests/unit/` covers each service: business rules, validation, authorization, idempotency, timeouts,
+  upstream failures, the crash endpoint and the mapping of DB connection errors to 503.
+* `tests/integration/` runs all 6 services in-process. They call each other through `httpx.ASGITransport`
+  and share an in-memory event bus. The tests cover purchase, failed payment, cancellation with refund,
+  data isolation and CORS.
+* `tests/e2e/` runs the purchase flow against the real containers and the PostgreSQL event bus.
 
 ## Project structure
 
 ```
-laba2/
+lab2/
 ├── README.md
-├── docker-compose.yml
+├── docker-compose.yml           # exactly 6 containers
 ├── .env.example
-├── libs/common/shopcommon/      # shared infrastructure: logging, errors, security, db, messaging, http client
+├── database/                    # SQL: database "shophub", 6 roles, 6 schemas, event bus tables
+├── frontend/index.html          # shop + control room UI
+├── libs/common/shopcommon/      # shared infrastructure: logging, errors, security, db, event bus, http client
 ├── services/
 │   ├── auth-service/            # each: <pkg>/{main,api,service,models,schemas,config}.py, Dockerfile, .env.example
 │   ├── user-service/
@@ -324,16 +223,18 @@ laba2/
 │   ├── order-service/
 │   ├── payment-service/
 │   └── notification-service/
-├── gateway/                     # API Gateway
-├── scripts/failover-demo.ps1    # fault-isolation demo
-├── scripts/show-db.ps1          # print the contents of all 6 databases
+├── scripts/
+│   ├── setup-database.ps1       # create the database in the local PostgreSQL (once)
+│   ├── show-db.ps1              # print what is stored in every schema
+│   └── failover-demo.ps1        # terminal version of the fault-isolation demo
 ├── tests/{unit,integration,e2e}/
-└── docs/                        # architecture.md, DEMO_RU.md (demo guide), openapi/*.json
+└── docs/                        # architecture.md, DEMO_RU.md, openapi/*.json
 ```
 
-## Known limitations / possible improvements
-* Events are published right after the DB commit. A transactional **outbox** would guarantee delivery if the
-  broker is down at that moment. For now a failed publish is logged as an error.
-* Schemas are created with `create_all`. A real project would use Alembic migrations.
-* The rate limiter keeps its state in memory (per gateway instance). With several replicas it would use Redis.
-* RabbitMQ is a single container. In production it would be a cluster with quorum queues.
+## Known limitations
+
+* The database is shared infrastructure. If PostgreSQL is down, every service answers `503` until it is back.
+* Events are written right after the business transaction commits, not inside it. A full transactional outbox
+  would close the small gap if the process crashes between the two steps.
+* Schemas are created with `create_all`. A production system would use migrations (Alembic).
+* The event bus polls every 0.5 s; `LISTEN/NOTIFY` could make delivery instant.

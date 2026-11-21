@@ -1,15 +1,21 @@
-"""Asynchronous messaging (RabbitMQ topic exchange) with an in-memory twin for tests.
+"""Asynchronous messaging between services, implemented on top of PostgreSQL.
+
+There is no separate message broker: the single ShopHub database holds an
+append-only event table ``bus.events``. A producer INSERTs an event; every
+consumer (one per service) reads new events in order and stores how far it got
+in ``bus.consumer_offsets``. While a consumer is down, events simply stay in
+the table and are processed after it restarts.
 
 Event envelope::
 
     {"event_id": "...", "event_type": "order.created", "occurred_at": "...",
      "request_id": "...", "data": {...}}
 
-Delivery guarantees (RabbitMQ): durable exchange & queues, persistent messages,
-manual ack. A message whose handler fails (e.g. the service's database is down)
-is parked in ``<queue>.retry`` and comes back after ``retry_delay_ms``; after
-``max_attempts`` it goes to the dead-letter queue ``<queue>.dlq``. Consumers are
-written to be idempotent.
+Delivery: at-least-once, in order. A failing handler is retried every
+``retry_delay`` seconds; after ``max_attempts`` the event is recorded in
+``bus.dead_letters`` and skipped. Consumers are written to be idempotent.
+
+``InMemoryEventBus`` has the same semantics and is used in tests.
 """
 
 from __future__ import annotations
@@ -106,7 +112,7 @@ class InMemoryEventBus(EventBus):
 
     def __init__(self) -> None:
         # (queue, routing keys, handler, service, lock). The lock makes delivery to one
-        # queue sequential and FIFO, like a single RabbitMQ consumer.
+        # queue sequential and FIFO, like a single consumer of bus.events.
         self.subscriptions: list[tuple[str, list[str], Handler, str, asyncio.Lock]] = []
         self.published: list[Event] = []
         self._tasks: set[asyncio.Task] = set()
@@ -152,127 +158,157 @@ class InMemoryEventBus(EventBus):
         return [e for e in self.published if e["event_type"] == event_type]
 
 
-class RabbitMQEventBus(EventBus):
+class PostgresEventBus(EventBus):
+    # Publishers serialize their INSERTs with this advisory lock so that event ids
+    # become visible in commit order and a consumer can never skip an event.
+    _PUBLISH_LOCK = 72_017
+
     def __init__(
         self,
         url: str,
         *,
         service_name: str,
-        exchange_name: str = "shop.events",
-        retry_delay_ms: int = 5000,
-        max_attempts: int = 60,
+        poll_interval: float = 0.5,
+        retry_delay: float = 3.0,
+        max_attempts: int = 40,
+        batch_size: int = 100,
     ) -> None:
         self.url = url
-        self.retry_delay_ms = retry_delay_ms
-        self.max_attempts = max_attempts
         self.service_name = service_name
-        self.exchange_name = exchange_name
-        self._connection = None
-        self._channel = None
-        self._exchange = None
-        self._dlx = None
+        self.poll_interval = poll_interval
+        self.retry_delay = retry_delay
+        self.max_attempts = max_attempts
+        self.batch_size = batch_size
+        self._engine = None
+        self._tasks: list[asyncio.Task] = []
 
     async def connect(self, retries: int = 30, delay: float = 2.0) -> None:
-        import aio_pika
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
 
+        self._engine = create_async_engine(self.url, pool_size=3, max_overflow=2, pool_pre_ping=True)
         for attempt in range(1, retries + 1):
             try:
-                self._connection = await aio_pika.connect_robust(self.url)
-                break
+                async with self._engine.connect() as conn:
+                    await conn.execute(text("SELECT 1 FROM bus.events LIMIT 1"))
+                logger.info("event bus ready (PostgreSQL bus.events)")
+                return
             except Exception as exc:  # noqa: BLE001
                 if attempt == retries:
-                    logger.error("message broker unavailable, giving up", extra=log_extra(error=str(exc)))
+                    logger.error("event bus unavailable, giving up", extra=log_extra(error=str(exc)))
                     raise
-                logger.warning("message broker not ready, retrying", extra=log_extra(attempt=attempt, error=str(exc)))
+                logger.warning("event bus not ready, retrying", extra=log_extra(attempt=attempt, error=str(exc)))
                 await asyncio.sleep(delay)
-        self._channel = await self._connection.channel()
-        await self._channel.set_qos(prefetch_count=10)
-        self._exchange = await self._channel.declare_exchange(
-            self.exchange_name, aio_pika.ExchangeType.TOPIC, durable=True
-        )
-        self._dlx = await self._channel.declare_exchange(
-            f"{self.exchange_name}.dlx", aio_pika.ExchangeType.DIRECT, durable=True
-        )
-        logger.info("connected to message broker", extra=log_extra(exchange=self.exchange_name))
 
     async def close(self) -> None:
-        if self._connection is not None:
-            await self._connection.close()
+        for task in self._tasks:
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._engine is not None:
+            await self._engine.dispose()
 
     async def publish(self, event_type: str, data: dict[str, Any]) -> Event:
-        import aio_pika
+        from sqlalchemy import text
 
-        if self._exchange is None:
-            raise RuntimeError("event bus is not connected")
         event = make_event(event_type, data)
-        message = aio_pika.Message(
-            body=json.dumps(event, default=str).encode(),
-            content_type="application/json",
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            message_id=event["event_id"],
-            type=event_type,
-            headers={"x-request-id": event["request_id"]},
-        )
-        await self._exchange.publish(message, routing_key=event_type)
+        async with self._engine.begin() as conn:
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": self._PUBLISH_LOCK})
+            await conn.execute(
+                text(
+                    "INSERT INTO bus.events (event_id, event_type, producer, payload) "
+                    "VALUES (:event_id, :event_type, :producer, CAST(:payload AS jsonb))"
+                ),
+                {
+                    "event_id": event["event_id"],
+                    "event_type": event_type,
+                    "producer": self.service_name,
+                    "payload": json.dumps(event, default=str),
+                },
+            )
         logger.info("event published", extra=log_extra(event_type=event_type, event_id=event["event_id"]))
         return event
 
     async def subscribe(self, queue_name: str, routing_keys: list[str], handler: Handler, *, service_name: str) -> None:
-        import aio_pika
+        from sqlalchemy import text
 
-        retry_queue = f"{queue_name}.retry"
-        # Messages expire from the retry queue back into the main queue (delayed retry).
-        await self._channel.declare_queue(
-            retry_queue,
-            durable=True,
-            arguments={
-                "x-message-ttl": self.retry_delay_ms,
-                "x-dead-letter-exchange": "",
-                "x-dead-letter-routing-key": queue_name,
-            },
-        )
-        dlq = await self._channel.declare_queue(f"{queue_name}.dlq", durable=True)
-        await dlq.bind(self._dlx, routing_key=queue_name)
-        queue = await self._channel.declare_queue(
-            queue_name,
-            durable=True,
-            arguments={"x-dead-letter-exchange": f"{self.exchange_name}.dlx", "x-dead-letter-routing-key": queue_name},
-        )
-        for key in routing_keys:
-            await queue.bind(self._exchange, routing_key=key)
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO bus.consumer_offsets (consumer) VALUES (:c) ON CONFLICT (consumer) DO NOTHING"),
+                {"c": queue_name},
+            )
+        self._tasks.append(asyncio.create_task(self._consume(queue_name, list(routing_keys), handler, service_name)))
+        logger.info("subscribed", extra=log_extra(consumer=queue_name, routing_keys=routing_keys))
 
-        async def on_message(message) -> None:
+    async def _consume(self, consumer: str, keys: list[str], handler: Handler, service_name: str) -> None:
+        from sqlalchemy import text
+
+        attempts = 0
+        while True:
             try:
-                event = json.loads(message.body)
-            except ValueError:
-                logger.error("malformed message rejected", extra=log_extra(queue=queue_name))
-                await message.reject(requeue=False)
-                return
-            if await run_handler(handler, event, service_name):
-                await message.ack()
-                return
-            attempts = int((message.headers or {}).get("x-attempts", 0)) + 1
-            if attempts >= self.max_attempts:
-                logger.error("giving up, message moved to DLQ", extra=log_extra(queue=queue_name, attempts=attempts))
-                await message.reject(requeue=False)  # -> dead-letter queue
-                return
-            retry = aio_pika.Message(
-                body=message.body,
-                content_type=message.content_type,
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                message_id=message.message_id,
-                type=message.type,
-                headers={**(message.headers or {}), "x-attempts": attempts},
-            )
-            await self._channel.default_exchange.publish(retry, routing_key=retry_queue)
-            await message.ack()
-            logger.warning(
-                "event will be retried",
-                extra=log_extra(queue=queue_name, attempts=attempts, delay_ms=self.retry_delay_ms),
+                async with self._engine.connect() as conn:
+                    offset = (
+                        await conn.execute(
+                            text("SELECT last_event_id FROM bus.consumer_offsets WHERE consumer = :c"), {"c": consumer}
+                        )
+                    ).scalar_one()
+                    rows = (
+                        await conn.execute(
+                            text("SELECT id, event_type, payload FROM bus.events WHERE id > :o ORDER BY id LIMIT :n"),
+                            {"o": offset, "n": self.batch_size},
+                        )
+                    ).all()
+                if not rows:
+                    await asyncio.sleep(self.poll_interval)
+                    continue
+
+                for row in rows:
+                    if any(topic_matches(k, row.event_type) for k in keys):
+                        payload = row.payload if isinstance(row.payload, dict) else json.loads(row.payload)
+                        if not await run_handler(handler, payload, service_name):
+                            attempts += 1
+                            if attempts < self.max_attempts:
+                                logger.warning(
+                                    "event will be retried",
+                                    extra=log_extra(consumer=consumer, event=row.id, attempts=attempts),
+                                )
+                                await asyncio.sleep(self.retry_delay)
+                                break  # re-read from the same offset
+                            await self._dead_letter(consumer, row.id, "handler failed")
+                    attempts = 0
+                    await self._advance(consumer, row.id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - database temporarily unavailable
+                logger.warning("event bus unavailable, retrying", extra=log_extra(consumer=consumer, error=str(exc)))
+                await asyncio.sleep(self.retry_delay)
+
+    async def _advance(self, consumer: str, event_id: int) -> None:
+        from sqlalchemy import text
+
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE bus.consumer_offsets SET last_event_id = :id, updated_at = now() WHERE consumer = :c"),
+                {"id": event_id, "c": consumer},
             )
 
-        await queue.consume(on_message)
-        logger.info("subscribed", extra=log_extra(queue=queue_name, routing_keys=routing_keys))
+    async def _dead_letter(self, consumer: str, event_id: int, error: str) -> None:
+        from sqlalchemy import text
+
+        logger.error("event moved to dead letters", extra=log_extra(consumer=consumer, event=event_id))
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                text("INSERT INTO bus.dead_letters (consumer, event_id, error) VALUES (:c, :e, :err)"),
+                {"c": consumer, "e": event_id, "err": error},
+            )
 
     async def is_healthy(self) -> bool:
-        return self._connection is not None and not self._connection.is_closed
+        from sqlalchemy import text
+
+        if self._engine is None:
+            return False
+        try:
+            async with self._engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            return True
+        except Exception:  # noqa: BLE001
+            return False

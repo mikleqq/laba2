@@ -12,9 +12,9 @@ async def test_seeded_catalog_is_public_and_searchable():
     app = _app(seed=True)
     async with running(app), client(app) as c:
         r = await c.get("/products")
-        assert r.status_code == 200 and r.json()["total"] == 5
-        r = await c.get("/products", params={"search": "keyboard"})
-        assert [p["name"] for p in r.json()["items"]] == ["Mechanical keyboard"]
+        assert r.status_code == 200 and r.json()["total"] == 8
+        r = await c.get("/products", params={"search": "клавиатура"})
+        assert [p["name"] for p in r.json()["items"]] == ["Механическая клавиатура"]
         r = await c.get("/products", params={"category": "books"})
         assert r.json()["total"] == 1
         assert (await c.get("/products/9999")).status_code == 404

@@ -8,8 +8,6 @@ differently per environment without code changes.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,9 +20,9 @@ class BaseServiceSettings(BaseSettings):
     # Persistence: each service points to its own database.
     database_url: str = "sqlite+aiosqlite:///:memory:"
 
-    # Messaging: when empty an in-process event bus is used (tests/local runs).
-    rabbitmq_url: Optional[str] = None
-    event_exchange: str = "shop.events"
+    # Messaging: with a PostgreSQL DATABASE_URL events go through the bus.* tables
+    # of the same database; otherwise (tests, SQLite) an in-process bus is used.
+    event_poll_interval_seconds: float = 0.5
 
     # Security
     jwt_secret: str = "dev-secret-change-me"
@@ -36,6 +34,9 @@ class BaseServiceSettings(BaseSettings):
 
     # Failure demo: exposes POST /chaos/crash (internal token required). Never enable in production.
     chaos_enabled: bool = False
+
+    # Browser origins allowed to call the API (the demo web UI).
+    cors_origins: list[str] = ["*"]
 
     # Startup: how long to wait for DB / broker to become available
     startup_retries: int = 30

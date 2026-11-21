@@ -2,7 +2,7 @@
     "openapi": "3.1.0",
     "info": {
         "title": "ShopHub Notification Service",
-        "description": "Consumes domain events from RabbitMQ and notifies users (email channel stub).",
+        "description": "Consumes domain events from the event bus and notifies users (email channel stub).",
         "version": "1.0.0"
     },
     "paths": {

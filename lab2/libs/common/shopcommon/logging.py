@@ -56,7 +56,7 @@ def setup_logging(service_name: str, level: str = "INFO") -> None:
         lg.propagate = True
     # Access logs are produced by our own middleware in JSON format.
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    for noisy in ("aio_pika", "aiormq", "httpx", "httpcore"):
+    for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

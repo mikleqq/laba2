@@ -3,7 +3,7 @@
 Every service runs in-process with its own in-memory SQLite database. Services
 talk to each other through ``httpx.ASGITransport`` (real HTTP semantics, no
 network) and through a shared ``InMemoryEventBus`` (same topic semantics as
-RabbitMQ). This lets us test the real inter-service flows without Docker.
+the PostgreSQL event bus). This lets us test the real inter-service flows without Docker.
 """
 
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -19,7 +19,7 @@ JWT_SECRET = "test-jwt-secret-that-is-long-enough-123"
 INTERNAL_TOKEN = "test-internal-token"
 SQLITE = "sqlite+aiosqlite:///:memory:"
 
-BASE = dict(jwt_secret=JWT_SECRET, internal_token=INTERNAL_TOKEN, database_url=SQLITE, rabbitmq_url=None, startup_retries=1)
+BASE = dict(jwt_secret=JWT_SECRET, internal_token=INTERNAL_TOKEN, database_url=SQLITE, startup_retries=1)
 
 
 def transport(app) -> httpx.ASGITransport:
@@ -63,9 +63,7 @@ class System:
 
 @pytest.fixture
 async def system():
-    """The whole platform (6 services + gateway) wired together in-process."""
-    from api_gateway.config import Settings as GatewaySettings
-    from api_gateway.main import create_app as gateway_app
+    """The whole platform (6 services) wired together in-process."""
     from auth_service.config import Settings as AuthSettings
     from auth_service.main import create_app as auth_app
     from notification_service.config import Settings as NotificationSettings
@@ -92,10 +90,6 @@ async def system():
         bootstrap_admin=False,
     )
     apps["orders"] = order_app(OrderSettings(**BASE), bus=bus, product_transport=transport(apps["products"]))
-    apps["gateway"] = gateway_app(
-        GatewaySettings(jwt_secret=JWT_SECRET, rate_limit_requests=1000),
-        transports={name: transport(app) for name, app in apps.items()},
-    )
     async with running(*apps.values()):
         clients = {name: client(app) for name, app in apps.items()}
         try:

@@ -17,11 +17,14 @@ from .schemas import ProductCreate, ProductUpdate, ReservedItem, StockItem
 logger = logging.getLogger("product_service")
 
 DEMO_PRODUCTS = [
-    ("Mechanical keyboard", "electronics", "89.99", 25, "Hot-swappable switches, RGB backlight"),
-    ("Wireless mouse", "electronics", "29.50", 40, "Ergonomic, 2.4 GHz"),
-    ("27\" 4K monitor", "electronics", "349.00", 10, "IPS panel, USB-C"),
-    ("Clean Architecture (book)", "books", "32.00", 15, "Robert C. Martin"),
-    ("Coffee mug", "home", "9.90", 100, "350 ml, ceramic"),
+    ("Механическая клавиатура", "electronics", "89.99", 25, "Hot-swap переключатели, RGB-подсветка"),
+    ("Беспроводная мышь", "electronics", "29.50", 40, "Эргономичная, 2.4 ГГц, до 12 месяцев от батарейки"),
+    ("Монитор 27\" 4K", "electronics", "349.00", 10, "IPS-матрица, USB-C с зарядкой ноутбука"),
+    ("Наушники с шумоподавлением", "electronics", "149.00", 15, "Bluetooth 5.3, 30 часов работы"),
+    ("Ноутбук 14\"", "electronics", "1299.00", 6, "16 ГБ ОЗУ, 512 ГБ SSD"),
+    ("Книга «Чистая архитектура»", "books", "32.00", 15, "Роберт Мартин, твёрдый переплёт"),
+    ("Кружка программиста", "home", "9.90", 100, "350 мл, керамика"),
+    ("Рюкзак для ноутбука", "accessories", "59.00", 20, "Водоотталкивающий, 20 л"),
 ]
 
 

@@ -33,7 +33,7 @@ async def test_amount_over_limit_is_declined():
         await bus.publish("order.created", {"order_id": 2, "user_id": 7, "total_amount": "500.00"})
         await bus.join()
         failed = bus.events_of("payment.failed")
-        assert len(failed) == 1 and "limit" in failed[0]["data"]["reason"]
+        assert len(failed) == 1 and "лимит" in failed[0]["data"]["reason"]
         assert (await c.get("/payments/order/2", headers=auth(7))).json()["status"] == "failed"
 
 
@@ -61,4 +61,4 @@ async def test_ready_reports_broker_and_database():
     bus = InMemoryEventBus()
     app = _app(bus)
     async with running(app), client(app) as c:
-        assert (await c.get("/ready")).json()["checks"] == {"database": True, "message_broker": True}
+        assert (await c.get("/ready")).json()["checks"] == {"database": True, "event_bus": True}

@@ -1,2 +1,0 @@
-# Service-specific dependencies of api-gateway.
-# Common runtime deps (FastAPI, SQLAlchemy, aio-pika, httpx, PyJWT) come from libs/common.

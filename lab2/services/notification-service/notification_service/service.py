@@ -18,22 +18,19 @@ logger = logging.getLogger("notification_service")
 
 # event type -> (subject, body). Placeholders are filled from the event payload.
 TEMPLATES: dict[str, tuple[str, str]] = {
-    "user.registered": ("Welcome to ShopHub!", "Hi {full_name}, your account {email} has been created."),
-    "order.created": (
-        "Order #{order_id} received",
-        "Your order #{order_id} for {total_amount} has been created and is awaiting payment.",
-    ),
-    "order.cancelled": ("Order #{order_id} cancelled", "Your order #{order_id} has been cancelled."),
+    "user.registered": ("Добро пожаловать в ShopHub!", "Здравствуйте, {full_name}! Аккаунт {email} создан."),
+    "order.created": ("Заказ №{order_id} принят", "Заказ №{order_id} на сумму {total_amount} $ создан и ожидает оплаты."),
+    "order.cancelled": ("Заказ №{order_id} отменён", "Заказ №{order_id} отменён."),
     "payment.completed": (
-        "Payment received for order #{order_id}",
-        "We received your payment of {amount} (transaction {transaction_id}). Your order is being prepared.",
+        "Заказ №{order_id} оплачен",
+        "Платёж {amount} $ прошёл (транзакция {transaction_id}). Заказ собирается.",
     ),
-    "payment.failed": ("Payment failed for order #{order_id}", "Payment of {amount} was declined: {reason}."),
-    "payment.refunded": ("Refund for order #{order_id}", "{amount} has been refunded to your card."),
+    "payment.failed": ("Оплата заказа №{order_id} отклонена", "Платёж {amount} $ отклонён: {reason}."),
+    "payment.refunded": ("Возврат по заказу №{order_id}", "{amount} $ возвращены на карту."),
 }
 
 ADMIN_TEMPLATES: dict[str, tuple[str, str]] = {
-    "product.low_stock": ("Low stock: {name}", "Product #{product_id} '{name}' has only {stock} item(s) left."),
+    "product.low_stock": ("Мало товара: {name}", "Товар №{product_id} «{name}»: осталось {stock} шт."),
 }
 
 

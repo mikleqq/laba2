@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Awaitable, Callable, Iterable, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import MetaData
 
@@ -16,7 +17,7 @@ from .config import BaseServiceSettings
 from .db import Database
 from .errors import register_exception_handlers
 from .logging import log_extra, setup_logging
-from .messaging import EventBus, InMemoryEventBus, RabbitMQEventBus
+from .messaging import EventBus, InMemoryEventBus, PostgresEventBus
 from .middleware import RequestContextMiddleware
 from .security import require_internal
 
@@ -83,9 +84,11 @@ def create_service_app(
     db = Database(settings.database_url, metadata) if metadata is not None else None
     owns_bus = bus is None
     if use_messaging and bus is None:
-        if settings.rabbitmq_url:
-            bus = RabbitMQEventBus(
-                settings.rabbitmq_url, service_name=settings.service_name, exchange_name=settings.event_exchange
+        if settings.database_url.startswith("postgresql"):
+            bus = PostgresEventBus(
+                settings.database_url,
+                service_name=settings.service_name,
+                poll_interval=settings.event_poll_interval_seconds,
             )
         else:
             bus = InMemoryEventBus()
@@ -125,11 +128,20 @@ def create_service_app(
     if db is not None:
         checks["database"] = db.ping
     if bus is not None:
-        checks["message_broker"] = bus.is_healthy
+        checks["event_bus"] = bus.is_healthy
     checks.update(ready_checks or {})
     app.state.ready_checks = checks
 
     app.add_middleware(RequestContextMiddleware, service_name=settings.service_name)
+    # The web UI (frontend/index.html) talks to every service directly from the browser.
+    # Tokens travel in the Authorization header (no cookies), so a wildcard origin is safe here.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
     register_exception_handlers(app)
     app.include_router(_health_router(settings.service_name, version))
     app.state.crash = lambda: os._exit(1)
