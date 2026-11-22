@@ -1,6 +1,6 @@
 # ShopHub — Microservice Online Store (Lab 2)
 
-An electronics store backend built from **6 independent microservices running in 6 Docker containers**,
+A consumer electronics store built from **6 independent microservices running in 6 Docker containers**,
 sharing **one PostgreSQL database** (with a separate schema and login role per service), plus a web UI that
 shows live what happens when a service fails.
 
@@ -68,7 +68,7 @@ Trade-off: the database is a shared dependency. If PostgreSQL itself is down, al
   * `order.cancelled → payment-service` (refund) and `notification-service`.
   * `user.registered → notification-service` (welcome message).
 
-Internal endpoints (`/internal/*`, `/chaos/*`) require the shared service token `X-Internal-Token`.
+Internal endpoints (`/internal/*`) require the shared service token `X-Internal-Token`.
 
 ## Technology choices
 
@@ -107,39 +107,67 @@ If the UI cannot reach the services when opened as a file, serve it over HTTP in
 | `frontend/index.html` | the shop + control room (main demo) |
 | http://localhost:8001/docs … http://localhost:8006/docs | Swagger UI of each microservice |
 
-Default administrator: `admin@example.com` / `Admin12345!`. The catalog is seeded with 8 demo products.
+Default administrator: `admin@example.com` / `Admin12345!`. The catalog is seeded with 16 demo products (fictional brands).
 A PostgreSQL that is not on `localhost:5432` can be selected with `DB_HOST` / `DB_PORT`, for example
 `$env:DB_PORT=5433; docker compose up -d`.
 
-## Fault isolation demo
+## Fault isolation demo (manual)
 
-**In the UI:** every microservice has a card with a live status and a **💥 Уронить** (crash) button. The button calls
-`POST /chaos/crash`, and the service process exits with code 1, like a real crash. Then:
-
-* only the parts of the shop served by that service turn red ("сервис недоступен — остальной магазин работает");
-* the other 5 cards stay green and the shop keeps working;
-* Docker restarts the crashed container by itself (`restart: unless-stopped`), and the card turns green again;
-* an order placed while payment-service is down is accepted as `pending_payment` and becomes `paid` automatically
-  after the service is back, because the event waited in `bus.events`.
-
-**From the terminal:**
+The shop page shows a short notice only in the part that depends on the missing service
+("Каталог временно не обновляется", "Статус оплаты временно не обновляется", …) and keeps everything else working.
+The footer shows the live state of the 6 services.
 
 ```powershell
-docker compose stop payment-service                               # switch one service off
+# 1. switch one service off / on
+docker compose stop payment-service
 docker compose start payment-service
-docker compose up -d --build --no-deps --force-recreate order-service   # redeploy only one service
-powershell -ExecutionPolicy Bypass -File scripts\failover-demo.ps1 -Scenario all -Pause
-powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1      # what is stored in the database
+
+# 2. hard kill (no graceful shutdown); Docker does not restart it because it was a manual command
+docker kill notification-service
+docker start notification-service
+
+# 3. crash inside the container (main process ends); Docker restarts it automatically (restart: unless-stopped)
+docker exec order-service python -c "import os, signal; os.kill(1, signal.SIGTERM)"
+docker inspect -f "{{.RestartCount}}" order-service
+
+# 4. redeploy only one service; the other containers are not touched
+docker compose up -d --build --no-deps payment-service
 ```
 
-| Down | Unavailable (clean error) | Still works |
+| Down | Unavailable on the site | Still works |
 |---|---|---|
 | auth-service | login, registration | everything else; existing sessions stay valid |
-| user-service | profile | catalog, cart, orders, payments, notifications |
-| product-service | catalog, placing new orders | cart, existing orders, payments, notifications, profile |
-| order-service | placing / viewing orders | catalog, cart (kept in the browser), payments, notifications, profile |
+| user-service | profile, registration | login, catalog, cart, orders, payments, notifications |
+| product-service | catalog refresh, placing new orders | cart, existing orders, payments, notifications, profile |
+| order-service | placing / viewing orders | catalog, search, cart (kept in the browser), notifications, profile |
 | payment-service | payment status | everything else; new orders wait as `pending_payment` and get paid after restart |
 | notification-service | notifications | everything else; missed events are processed after restart |
+
+The step-by-step guide for the demo (Russian) is in [docs/DEMO_RU.md](docs/DEMO_RU.md).
+
+## Validation
+
+Input is checked twice: in the browser (field-level hints while typing) and on the server (so a direct API call
+cannot bypass it). The server answers `422` with a Russian message per field:
+
+```json
+{"error": {"code": "validation_error", "message": "Проверьте введённые данные",
+  "details": [{"field": "delivery.phone", "message": "Телефон должен содержать от 10 до 15 цифр, например +373 69 123 456"}]}}
+```
+
+| Field | Rule |
+|---|---|
+| email | valid address, max 255 |
+| password | 8–128 characters, at least one letter and one digit, no leading/trailing spaces |
+| name / recipient | 2–100 characters: letters, spaces, hyphen, apostrophe |
+| phone | digits, spaces, `+ ( ) -`; 10–15 digits |
+| address | 5–255 characters, must contain letters |
+| comment | up to 500 characters |
+| order items | 1–50 lines, quantity 1–100 and not more than in stock (409 otherwise) |
+| product (admin) | name 2–120, price > 0 with max 2 decimals, stock ≥ 0, category `^[a-z_]+$` |
+
+Rules: `libs/common/shopcommon/validation.py` (server) and the `RULES` object in `frontend/index.html` (browser).
+Tests: `tests/unit/test_validation.py`.
 
 ## Main API endpoints
 
@@ -160,7 +188,6 @@ powershell -ExecutionPolicy Bypass -File scripts\show-db.ps1      # what is stor
 | GET | notification :8006 | `/notifications` | user | own notifications |
 | POST | notification :8006 | `/notifications/{id}/read` | owner | mark as read |
 | GET | every service | `/health`, `/ready` | public | liveness / readiness (database, event bus) |
-| POST | every service | `/chaos/crash` | internal token | demo only: crash the process (`CHAOS_ENABLED=true`) |
 
 OpenAPI specs are exported to [docs/openapi/](docs/openapi/).
 
@@ -195,12 +222,12 @@ events**, so one purchase can be traced across order → payment → notificatio
 
 ```powershell
 pip install -r requirements-dev.txt
-pytest                   # 47 unit + integration tests, no Docker or PostgreSQL needed
+pytest                   # 72 unit + integration tests, no Docker or PostgreSQL needed
 pytest -m e2e            # purchase flow against the running containers + PostgreSQL
 ```
 
 * `tests/unit/` covers each service: business rules, validation, authorization, idempotency, timeouts,
-  upstream failures, the crash endpoint and the mapping of DB connection errors to 503.
+  upstream failures, input validation and the mapping of DB connection errors to 503.
 * `tests/integration/` runs all 6 services in-process. They call each other through `httpx.ASGITransport`
   and share an in-memory event bus. The tests cover purchase, failed payment, cancellation with refund,
   data isolation and CORS.
@@ -225,8 +252,7 @@ lab2/
 │   └── notification-service/
 ├── scripts/
 │   ├── setup-database.ps1       # create the database in the local PostgreSQL (once)
-│   ├── show-db.ps1              # print what is stored in every schema
-│   └── failover-demo.ps1        # terminal version of the fault-isolation demo
+│   └── show-db.ps1              # print what is stored in every schema
 ├── tests/{unit,integration,e2e}/
 └── docs/                        # architecture.md, DEMO_RU.md, openapi/*.json
 ```

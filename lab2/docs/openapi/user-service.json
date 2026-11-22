@@ -48,39 +48,6 @@
                 }
             }
         },
-        "/chaos/crash": {
-            "post": {
-                "tags": [
-                    "chaos (demo only)"
-                ],
-                "summary": "Simulate a crash: the process exits with code 1 (Docker restarts it)",
-                "operationId": "crash_chaos_crash_post",
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "additionalProperties": true,
-                                    "type": "object",
-                                    "title": "Response Crash Chaos Crash Post"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/users/me": {
             "get": {
                 "tags": [
@@ -582,9 +549,7 @@
                     "full_name": {
                         "anyOf": [
                             {
-                                "type": "string",
-                                "maxLength": 100,
-                                "minLength": 1
+                                "type": "string"
                             },
                             {
                                 "type": "null"
@@ -595,8 +560,7 @@
                     "phone": {
                         "anyOf": [
                             {
-                                "type": "string",
-                                "pattern": "^\\+?[0-9 ()-]{6,20}$"
+                                "type": "string"
                             },
                             {
                                 "type": "null"
@@ -607,9 +571,7 @@
                     "address": {
                         "anyOf": [
                             {
-                                "type": "string",
-                                "maxLength": 255,
-                                "minLength": 3
+                                "type": "string"
                             },
                             {
                                 "type": "null"
@@ -621,9 +583,9 @@
                 "type": "object",
                 "title": "ProfileUpdate",
                 "example": {
-                    "address": "Chisinau",
-                    "full_name": "Alice Smith",
-                    "phone": "+373 69 123456"
+                    "address": "\u0420\u0459\u0420\u0451\u0421\u20ac\u0420\u0451\u0420\u0405\u0421\u2018\u0420\u0406, \u0421\u0453\u0420\u00bb. \u0420\u045f\u0421\u0453\u0421\u20ac\u0420\u0454\u0420\u0451\u0420\u0405\u0420\u00b0, 10",
+                    "full_name": "\u0420\u0452\u0420\u00bb\u0420\u0451\u0421\u0403\u0420\u00b0 \u0420\udc98\u0420\u0406\u0420\u00b0\u0420\u0405\u0420\u0455\u0420\u0406\u0420\u00b0",
+                    "phone": "+373 69 123 456"
                 }
             },
             "ValidationError": {

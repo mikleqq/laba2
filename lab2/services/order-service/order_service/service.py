@@ -51,7 +51,16 @@ class OrderService:
         reserved = response.json()["items"]
 
         # 2. Persist the order.
-        order = Order(user_id=user.id, status=OrderStatus.PENDING_PAYMENT, total_amount=Decimal("0"))
+        delivery = data.delivery
+        order = Order(
+            user_id=user.id,
+            status=OrderStatus.PENDING_PAYMENT,
+            total_amount=Decimal("0"),
+            recipient=delivery.recipient,
+            contact_phone=delivery.phone,
+            delivery_address=delivery.address,
+            comment=delivery.comment,
+        )
         total = Decimal("0")
         for item in reserved:
             price = Decimal(str(item["unit_price"]))

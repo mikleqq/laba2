@@ -16,15 +16,24 @@ from .schemas import ProductCreate, ProductUpdate, ReservedItem, StockItem
 
 logger = logging.getLogger("product_service")
 
+# (name, category, price, stock, description). Brands are fictional.
 DEMO_PRODUCTS = [
-    ("Механическая клавиатура", "electronics", "89.99", 25, "Hot-swap переключатели, RGB-подсветка"),
-    ("Беспроводная мышь", "electronics", "29.50", 40, "Эргономичная, 2.4 ГГц, до 12 месяцев от батарейки"),
-    ("Монитор 27\" 4K", "electronics", "349.00", 10, "IPS-матрица, USB-C с зарядкой ноутбука"),
-    ("Наушники с шумоподавлением", "electronics", "149.00", 15, "Bluetooth 5.3, 30 часов работы"),
-    ("Ноутбук 14\"", "electronics", "1299.00", 6, "16 ГБ ОЗУ, 512 ГБ SSD"),
-    ("Книга «Чистая архитектура»", "books", "32.00", 15, "Роберт Мартин, твёрдый переплёт"),
-    ("Кружка программиста", "home", "9.90", 100, "350 мл, керамика"),
-    ("Рюкзак для ноутбука", "accessories", "59.00", 20, "Водоотталкивающий, 20 л"),
+    ("Смартфон Nova X12, 128 ГБ", "smartphones", "499.00", 18, "6,4\" AMOLED 120 Гц, камера 50 Мп, 5000 мА·ч"),
+    ("Смартфон Nova X12 Pro, 256 ГБ", "smartphones", "749.00", 9, "6,7\" LTPO, тройная камера, зарядка 67 Вт"),
+    ("Ноутбук Vertex Air 14", "laptops", "1099.00", 7, "14\" 2.8K, 16 ГБ ОЗУ, SSD 512 ГБ, 1,2 кг"),
+    ("Игровой ноутбук Vertex Storm 16", "laptops", "1799.00", 4, "16\" 240 Гц, RTX-класс графика, 32 ГБ ОЗУ"),
+    ("Планшет Nova Tab 11", "tablets", "399.00", 12, "11\" 2K, 8 ГБ / 128 ГБ, поддержка стилуса"),
+    ("Телевизор Lumio 55\" 4K", "tv", "649.00", 6, "QLED, HDR10+, Smart TV, 120 Гц"),
+    ("Монитор Pixelon 27\" 4K", "monitors", "349.00", 10, "IPS, 99% sRGB, USB-C 90 Вт"),
+    ("Игровой монитор Pixelon 32\" QHD", "monitors", "429.00", 8, "VA, 165 Гц, 1 мс, изогнутый 1500R"),
+    ("Наушники Sonar ANC", "audio", "149.00", 15, "Активное шумоподавление, 30 ч работы"),
+    ("Беспроводные наушники Sonar Buds", "audio", "89.00", 25, "TWS, Bluetooth 5.3, защита IPX4"),
+    ("Колонка Sonar Boom", "audio", "69.00", 20, "Портативная, 20 Вт, влагозащита IP67"),
+    ("Смарт-часы Pulse 3", "wearables", "199.00", 14, "AMOLED, пульс и SpO2, GPS, 10 дней работы"),
+    ("Игровая консоль Arcadia One", "gaming", "499.00", 5, "4K 120 FPS, SSD 1 ТБ, геймпад в комплекте"),
+    ("Геймпад Arcadia", "gaming", "59.00", 30, "Беспроводной, вибрация, 40 ч работы"),
+    ("Механическая клавиатура Keyforge", "accessories", "89.99", 25, "Hot-swap переключатели, RGB-подсветка"),
+    ("Беспроводная мышь Glide", "accessories", "29.50", 40, "Эргономичная, 2.4 ГГц + Bluetooth"),
 ]
 
 
@@ -131,10 +140,14 @@ class ProductService:
                 )
 
     async def seed(self) -> None:
-        count = await self.session.scalar(select(func.count()).select_from(Product))
-        if count:
-            return
+        """Add the demo catalog items that are not in the database yet (matched by name)."""
+        existing = set(await self.session.scalars(select(Product.name)))
+        added = 0
         for name, category, price, stock, description in DEMO_PRODUCTS:
+            if name in existing:
+                continue
             self.session.add(Product(name=name, category=category, price=Decimal(price), stock=stock, description=description))
-        await self.session.commit()
-        logger.info("demo catalog seeded", extra=log_extra(products=len(DEMO_PRODUCTS)))
+            added += 1
+        if added:
+            await self.session.commit()
+            logger.info("demo catalog seeded", extra=log_extra(products=added))

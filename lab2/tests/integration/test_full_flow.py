@@ -1,6 +1,6 @@
 """End-to-end business scenarios: the client talks to each service directly (like the web UI)."""
 
-from conftest import ADMIN
+from conftest import ADMIN, DELIVERY
 
 
 async def _register_and_login(system, email="alice@example.com", password="Secret123!", name="Alice"):
@@ -28,7 +28,7 @@ async def test_successful_purchase_flow(system):
 
     # REST to product-service (stock), then asynchronous payment through the event bus
     r = await system["orders"].post(
-        "/orders", json={"items": [{"product_id": product["id"], "quantity": 2}]}, headers=headers
+        "/orders", json={"items": [{"product_id": product["id"], "quantity": 2}], "delivery": DELIVERY}, headers=headers
     )
     assert r.status_code == 201, r.text
     order = r.json()
@@ -57,7 +57,7 @@ async def test_failed_payment_releases_stock(system):
 
     # 2 x 900 = 1800 > payment limit (1000 in the test config)
     r = await system["orders"].post(
-        "/orders", json={"items": [{"product_id": product["id"], "quantity": 2}]}, headers=headers
+        "/orders", json={"items": [{"product_id": product["id"], "quantity": 2}], "delivery": DELIVERY}, headers=headers
     )
     order = r.json()
     await system.bus.join()
@@ -76,7 +76,7 @@ async def test_cancel_paid_order_refunds(system):
     product = await _product(system, "Mug", 10, 10)
     order = (
         await system["orders"].post(
-            "/orders", json={"items": [{"product_id": product["id"], "quantity": 1}]}, headers=headers
+            "/orders", json={"items": [{"product_id": product["id"], "quantity": 1}], "delivery": DELIVERY}, headers=headers
         )
     ).json()
     await system.bus.join()
@@ -96,7 +96,7 @@ async def test_users_cannot_see_each_others_data(system):
     product = await _product(system, "Pen", 1, 10)
     order = (
         await system["orders"].post(
-            "/orders", json={"items": [{"product_id": product["id"], "quantity": 1}]}, headers=alice
+            "/orders", json={"items": [{"product_id": product["id"], "quantity": 1}], "delivery": DELIVERY}, headers=alice
         )
     ).json()
     await system.bus.join()

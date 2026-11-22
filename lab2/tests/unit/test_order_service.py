@@ -1,6 +1,6 @@
 import httpx
 
-from conftest import ADMIN, BASE, auth, client, running, transport
+from conftest import ADMIN, BASE, DELIVERY, auth, client, running, transport
 from order_service.config import Settings as OrderSettings
 from order_service.main import create_app as order_app
 from product_service.config import Settings as ProductSettings
@@ -20,7 +20,7 @@ async def test_create_order_reserves_stock_and_publishes_event():
     async with running(products, orders), client(products) as pc, client(orders) as oc:
         p = (await pc.post("/products", json={"name": "Pen", "price": 2.5, "stock": 10}, headers=ADMIN)).json()
 
-        r = await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 4}]}, headers=auth(1))
+        r = await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 4}], "delivery": DELIVERY}, headers=auth(1))
         assert r.status_code == 201, r.text
         order = r.json()
         assert order["status"] == "pending_payment"
@@ -38,13 +38,13 @@ async def test_order_errors_from_product_service_are_propagated():
     bus, products, orders = await _setup()
     async with running(products, orders), client(products) as pc, client(orders) as oc:
         p = (await pc.post("/products", json={"name": "Pen", "price": 2.5, "stock": 1}, headers=ADMIN)).json()
-        r = await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 5}]}, headers=auth(1))
+        r = await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 5}], "delivery": DELIVERY}, headers=auth(1))
         assert r.status_code == 409
-        r = await oc.post("/orders", json={"items": [{"product_id": 12345, "quantity": 1}]}, headers=auth(1))
+        r = await oc.post("/orders", json={"items": [{"product_id": 12345, "quantity": 1}], "delivery": DELIVERY}, headers=auth(1))
         assert r.status_code == 404
-        r = await oc.post("/orders", json={"items": []}, headers=auth(1))
+        r = await oc.post("/orders", json={"items": [], "delivery": DELIVERY}, headers=auth(1))
         assert r.status_code == 422
-        assert (await oc.post("/orders", json={"items": [{"product_id": 1, "quantity": 1}]})).status_code == 401
+        assert (await oc.post("/orders", json={"items": [{"product_id": 1, "quantity": 1}], "delivery": DELIVERY})).status_code == 401
         assert not bus.events_of("order.created")
 
 
@@ -55,7 +55,7 @@ async def test_product_service_timeout_returns_504():
 
     orders = order_app(OrderSettings(**BASE, http_timeout_seconds=0.1), bus=InMemoryEventBus(), product_transport=SlowTransport())
     async with running(orders), client(orders) as oc:
-        r = await oc.post("/orders", json={"items": [{"product_id": 1, "quantity": 1}]}, headers=auth(1))
+        r = await oc.post("/orders", json={"items": [{"product_id": 1, "quantity": 1}], "delivery": DELIVERY}, headers=auth(1))
         assert r.status_code == 504
         assert r.json()["error"]["code"] == "upstream_timeout"
 
@@ -64,8 +64,8 @@ async def test_payment_events_update_order_status_and_release_stock():
     bus, products, orders = await _setup()
     async with running(products, orders), client(products) as pc, client(orders) as oc:
         p = (await pc.post("/products", json={"name": "Pen", "price": 1, "stock": 10}, headers=ADMIN)).json()
-        o1 = (await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 3}]}, headers=auth(1))).json()
-        o2 = (await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 2}]}, headers=auth(1))).json()
+        o1 = (await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 3}], "delivery": DELIVERY}, headers=auth(1))).json()
+        o2 = (await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 2}], "delivery": DELIVERY}, headers=auth(1))).json()
         assert (await pc.get(f"/products/{p['id']}")).json()["stock"] == 5
 
         await bus.publish("payment.completed", {"order_id": o1["id"], "user_id": 1, "amount": "3.00"})
@@ -86,7 +86,7 @@ async def test_ownership_cancel_and_listing():
     bus, products, orders = await _setup()
     async with running(products, orders), client(products) as pc, client(orders) as oc:
         p = (await pc.post("/products", json={"name": "Pen", "price": 1, "stock": 10}, headers=ADMIN)).json()
-        o = (await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 4}]}, headers=auth(1))).json()
+        o = (await oc.post("/orders", json={"items": [{"product_id": p["id"], "quantity": 4}], "delivery": DELIVERY}, headers=auth(1))).json()
 
         assert (await oc.get(f"/orders/{o['id']}", headers=auth(2))).status_code == 404  # other user
         assert (await oc.get(f"/orders/{o['id']}", headers=ADMIN)).status_code == 200

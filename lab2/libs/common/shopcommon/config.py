@@ -32,9 +32,6 @@ class BaseServiceSettings(BaseSettings):
     # Outgoing HTTP calls to other services
     http_timeout_seconds: float = 5.0
 
-    # Failure demo: exposes POST /chaos/crash (internal token required). Never enable in production.
-    chaos_enabled: bool = False
-
     # Browser origins allowed to call the API (the demo web UI).
     cors_origins: list[str] = ["*"]
 

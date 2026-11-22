@@ -86,7 +86,7 @@ async def test_wrong_password_401():
     fake, _ = _fake_user_service()
     app = _app(fake)
     async with running(app), client(app) as c:
-        await c.post("/auth/register", json={"email": "c@example.com", "password": "Secret123!", "full_name": "C"})
+        await c.post("/auth/register", json={"email": "c@example.com", "password": "Secret123!", "full_name": "Cecil"})
         r = await c.post("/auth/login", json={"email": "c@example.com", "password": "nope-nope"})
         assert r.status_code == 401
         assert r.json()["error"]["code"] == "invalid_credentials"
@@ -96,7 +96,7 @@ async def test_registration_rolled_back_when_user_service_fails():
     fake, _ = _fake_user_service(status=500)
     app = _app(fake)
     async with running(app), client(app) as c:
-        body = {"email": "d@example.com", "password": "Secret123!", "full_name": "D"}
+        body = {"email": "d@example.com", "password": "Secret123!", "full_name": "Dora"}
         r = await c.post("/auth/register", json=body)
         assert r.status_code == 502
         assert "Traceback" not in r.text
@@ -111,7 +111,7 @@ async def test_registration_when_user_service_unreachable():
 
     app = _app(httpx.MockTransport(refuse))
     async with running(app), client(app) as c:
-        r = await c.post("/auth/register", json={"email": "e@example.com", "password": "Secret123!", "full_name": "E"})
+        r = await c.post("/auth/register", json={"email": "e@example.com", "password": "Secret123!", "full_name": "Emil"})
         assert r.status_code == 502
         assert r.json()["error"]["code"] == "upstream_unavailable"
 

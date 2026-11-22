@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from shopcommon.validation import Address, PersonName, Phone
+
 
 class ProfileCreate(BaseModel):
     id: int = Field(gt=0)
@@ -11,12 +13,14 @@ class ProfileCreate(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
-    full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    phone: Optional[str] = Field(default=None, pattern=r"^\+?[0-9 ()-]{6,20}$")
-    address: Optional[str] = Field(default=None, min_length=3, max_length=255)
+    full_name: Optional[PersonName] = None
+    phone: Optional[Phone] = None
+    address: Optional[Address] = None
 
     model_config = ConfigDict(
-        json_schema_extra={"example": {"full_name": "Alice Smith", "phone": "+373 69 123456", "address": "Chisinau"}}
+        json_schema_extra={
+            "example": {"full_name": "Алиса Иванова", "phone": "+373 69 123 456", "address": "Кишинёв, ул. Пушкина, 10"}
+        }
     )
 
 

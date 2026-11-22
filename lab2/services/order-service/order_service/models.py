@@ -1,7 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from shopcommon.db import utcnow
@@ -25,6 +26,11 @@ class Order(Base):
     user_id: Mapped[int] = mapped_column(index=True)
     status: Mapped[str] = mapped_column(String(30), default=OrderStatus.PENDING_PAYMENT, index=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    # delivery details (nullable so that rows created by older versions stay valid)
+    recipient: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    delivery_address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

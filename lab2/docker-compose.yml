@@ -8,7 +8,7 @@ name: shophub
 # services go through the bus.* tables of the same database.
 # Prepare the database once:  powershell -ExecutionPolicy Bypass -File scripts\setup-database.ps1
 #
-# Any single service can be stopped, crashed, restarted or rebuilt alone:
+# Any single service can be stopped, killed, restarted or rebuilt alone:
 #   docker compose stop payment-service
 #   docker compose up -d --build --no-deps payment-service
 
@@ -27,7 +27,6 @@ x-env: &env
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
   INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token-change-me}
-  CHAOS_ENABLED: ${CHAOS_ENABLED:-true}   # enables POST /chaos/crash for the failure demo
 
 services:
   auth-service:

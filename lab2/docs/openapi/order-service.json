@@ -48,39 +48,6 @@
                 }
             }
         },
-        "/chaos/crash": {
-            "post": {
-                "tags": [
-                    "chaos (demo only)"
-                ],
-                "summary": "Simulate a crash: the process exits with code 1 (Docker restarts it)",
-                "operationId": "crash_chaos_crash_post",
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "additionalProperties": true,
-                                    "type": "object",
-                                    "title": "Response Crash Chaos Crash Post"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/orders": {
             "post": {
                 "tags": [
@@ -409,6 +376,41 @@
     },
     "components": {
         "schemas": {
+            "DeliveryIn": {
+                "properties": {
+                    "recipient": {
+                        "type": "string",
+                        "title": "Recipient"
+                    },
+                    "phone": {
+                        "type": "string",
+                        "title": "Phone"
+                    },
+                    "address": {
+                        "type": "string",
+                        "title": "Address"
+                    },
+                    "comment": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 500
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Comment"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "recipient",
+                    "phone",
+                    "address"
+                ],
+                "title": "DeliveryIn"
+            },
             "ErrorDetail": {
                 "properties": {
                     "code": {
@@ -476,14 +478,24 @@
                         "maxItems": 50,
                         "minItems": 1,
                         "title": "Items"
+                    },
+                    "delivery": {
+                        "$ref": "#/components/schemas/DeliveryIn"
                     }
                 },
                 "type": "object",
                 "required": [
-                    "items"
+                    "items",
+                    "delivery"
                 ],
                 "title": "OrderCreate",
                 "example": {
+                    "delivery": {
+                        "address": "\u0420\u0459\u0420\u0451\u0421\u20ac\u0420\u0451\u0420\u0405\u0421\u2018\u0420\u0406, \u0421\u0453\u0420\u00bb. \u0420\u045f\u0421\u0453\u0421\u20ac\u0420\u0454\u0420\u0451\u0420\u0405\u0420\u00b0, 10, \u0420\u0454\u0420\u0406. 5",
+                        "comment": "\u0420\u045f\u0420\u0455\u0420\u00b7\u0420\u0406\u0420\u0455\u0420\u0405\u0420\u0451\u0421\u201a\u0421\u040a \u0420\u00b7\u0420\u00b0 \u0421\u2021\u0420\u00b0\u0421\u0403",
+                        "phone": "+373 69 123 456",
+                        "recipient": "\u0420\u0452\u0420\u00bb\u0420\u0451\u0421\u0403\u0420\u00b0 \u0420\udc98\u0420\u0406\u0420\u00b0\u0420\u0405\u0420\u0455\u0420\u0406\u0420\u00b0"
+                    },
                     "items": [
                         {
                             "product_id": 1,
@@ -501,7 +513,7 @@
                     },
                     "quantity": {
                         "type": "integer",
-                        "maximum": 1000.0,
+                        "maximum": 100.0,
                         "exclusiveMinimum": 0.0,
                         "title": "Quantity"
                     }
@@ -565,6 +577,50 @@
                         },
                         "type": "array",
                         "title": "Items"
+                    },
+                    "recipient": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Recipient"
+                    },
+                    "contact_phone": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Contact Phone"
+                    },
+                    "delivery_address": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Delivery Address"
+                    },
+                    "comment": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Comment"
                     },
                     "created_at": {
                         "type": "string",

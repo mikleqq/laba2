@@ -12,10 +12,10 @@ async def test_seeded_catalog_is_public_and_searchable():
     app = _app(seed=True)
     async with running(app), client(app) as c:
         r = await c.get("/products")
-        assert r.status_code == 200 and r.json()["total"] == 8
+        assert r.status_code == 200 and r.json()["total"] == 16
         r = await c.get("/products", params={"search": "клавиатура"})
-        assert [p["name"] for p in r.json()["items"]] == ["Механическая клавиатура"]
-        r = await c.get("/products", params={"category": "books"})
+        assert [p["name"] for p in r.json()["items"]] == ["Механическая клавиатура Keyforge"]
+        r = await c.get("/products", params={"category": "tv"})
         assert r.json()["total"] == 1
         assert (await c.get("/products/9999")).status_code == 404
 
@@ -44,8 +44,8 @@ async def test_stock_reservation_is_atomic():
     bus = InMemoryEventBus()
     app = _app(bus=bus)
     async with running(app), client(app) as c:
-        a = (await c.post("/products", json={"name": "A", "price": 10, "stock": 5}, headers=ADMIN)).json()
-        b = (await c.post("/products", json={"name": "B", "price": 20, "stock": 1}, headers=ADMIN)).json()
+        a = (await c.post("/products", json={"name": "Item A", "price": 10, "stock": 5}, headers=ADMIN)).json()
+        b = (await c.post("/products", json={"name": "Item B", "price": 20, "stock": 1}, headers=ADMIN)).json()
 
         # B has not enough stock -> nothing reserved at all
         r = await c.post(
@@ -64,7 +64,7 @@ async def test_stock_reservation_is_atomic():
             headers=INTERNAL,
         )
         assert r.status_code == 200
-        assert r.json()["items"] == [{"product_id": a["id"], "name": "A", "unit_price": 10.0, "quantity": 3}]
+        assert r.json()["items"] == [{"product_id": a["id"], "name": "Item A", "unit_price": 10.0, "quantity": 3}]
         assert (await c.get(f"/products/{a['id']}")).json()["stock"] == 2
         assert bus.events_of("product.low_stock")[0]["data"]["stock"] == 2
 

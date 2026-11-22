@@ -20,6 +20,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Admin12345!")
 
 pytestmark = pytest.mark.e2e
 
+DELIVERY = {"recipient": "Тест Тестов", "phone": "+373 69 123 456", "address": "Кишинёв, ул. Пушкина, 10"}
+
 
 def url(service: str, path: str) -> str:
     return f"{HOST}:{PORTS[service]}{path}"
@@ -58,14 +60,14 @@ def _wait_for(predicate, timeout=20.0):
 
 def test_purchase_through_postgres_event_bus(http):
     email = f"e2e-{uuid.uuid4().hex[:8]}@example.com"
-    r = http.post(url("auth", "/auth/register"), json={"email": email, "password": "Secret123!", "full_name": "E2E"})
+    r = http.post(url("auth", "/auth/register"), json={"email": email, "password": "Secret123!", "full_name": "Тест Тестов"})
     assert r.status_code == 201, r.text
     user = _login(http, email, "Secret123!")
     admin = _login(http, ADMIN_EMAIL, ADMIN_PASSWORD)
 
     product = http.post(url("products", "/products"), json={"name": "E2E item", "price": 12.5, "stock": 5}, headers=admin).json()
     order = http.post(
-        url("orders", "/orders"), json={"items": [{"product_id": product["id"], "quantity": 2}]}, headers=user
+        url("orders", "/orders"), json={"items": [{"product_id": product["id"], "quantity": 2}], "delivery": DELIVERY}, headers=user
     ).json()
     assert order["status"] == "pending_payment"
 

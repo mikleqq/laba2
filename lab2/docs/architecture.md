@@ -112,8 +112,7 @@ bus.dead_letters(consumer, event_id, error)
 | timeouts + retries on REST calls, clean 502/503/504 | a dead dependency fails fast, nothing hangs or cascades |
 | events stored in the database | asynchronous work waits for a stopped service and is not lost |
 | JWT verified by every service | logged-in users keep working when auth-service is down |
-| UI calls each service directly | the UI only greys out the part that belongs to the failed service |
-| `POST /chaos/crash` (demo flag) | lets you show a real crash (exit code 1) on demand |
+| UI calls each service directly | the UI shows a short notice only in the part that belongs to the failed service |
 
 ## 7. Service internals
 

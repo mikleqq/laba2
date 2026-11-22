@@ -13,6 +13,22 @@ from .models import Base
 from .service import OrderService
 
 
+async def upgrade_schema(db) -> None:
+    """Add the delivery columns to an orders table created by an older version (PostgreSQL)."""
+    if db.engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    async with db.engine.begin() as conn:
+        for ddl in (
+            "ADD COLUMN IF NOT EXISTS recipient varchar(100)",
+            "ADD COLUMN IF NOT EXISTS contact_phone varchar(32)",
+            "ADD COLUMN IF NOT EXISTS delivery_address varchar(255)",
+            "ADD COLUMN IF NOT EXISTS comment text",
+        ):
+            await conn.execute(text(f"ALTER TABLE orders {ddl}"))
+
+
 def create_app(
     settings: Optional[Settings] = None,
     *,
@@ -29,6 +45,8 @@ def create_app(
     )
 
     async def on_startup(app: FastAPI) -> None:
+        await upgrade_schema(app.state.db)
+
         async def handle_payment(event: Event) -> None:
             async with app.state.db.sessionmaker() as session:
                 await OrderService(session, product_client, app.state.bus).apply_payment_result(event)

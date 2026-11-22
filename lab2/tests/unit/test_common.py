@@ -112,28 +112,6 @@ async def test_service_client_propagates_request_id_and_internal_token():
     assert seen["x-internal-token"] == "tok"
 
 
-async def test_chaos_crash_endpoint_requires_token_and_crashes():
-    import asyncio
-
-    from conftest import BASE, INTERNAL, client, running
-    from user_service.config import Settings
-    from user_service.main import create_app
-
-    disabled = create_app(Settings(**BASE))
-    async with running(disabled), client(disabled) as c:
-        assert (await c.post("/chaos/crash", headers=INTERNAL)).status_code == 404  # off by default
-
-    app = create_app(Settings(**BASE, chaos_enabled=True))
-    crashed = []
-    app.state.crash = lambda: crashed.append(True)  # instead of os._exit(1)
-    async with running(app), client(app) as c:
-        assert (await c.post("/chaos/crash")).status_code == 403
-        r = await c.post("/chaos/crash", headers=INTERNAL)
-        assert r.status_code == 200 and r.json()["status"] == "crashing"
-        await asyncio.sleep(0.5)
-    assert crashed == [True]
-
-
 async def test_database_connection_failure_returns_503_not_500():
     from conftest import BASE, auth, client, running
     from user_service.config import Settings

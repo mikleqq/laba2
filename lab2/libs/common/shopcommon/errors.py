@@ -116,6 +116,43 @@ _HTTP_CODES = {
 }
 
 
+def humanize_validation_error(err: dict) -> str:
+    """Turn a pydantic error into a short Russian message for the customer."""
+    kind = err.get("type", "")
+    ctx = err.get("ctx") or {}
+    msg = str(err.get("msg", ""))
+    field = str(err.get("loc", ("",))[-1])
+    if kind == "missing":
+        return "Обязательное поле"
+    if kind == "value_error":
+        if field == "email" or "email address" in msg:
+            return "Введите корректный email, например anna@example.com"
+        return msg.removeprefix("Value error, ")
+    if kind == "string_too_short":
+        return "Поле не может быть пустым" if ctx.get("min_length") == 1 else f"Минимум {ctx.get('min_length')} символов"
+    if kind == "string_too_long":
+        return f"Максимум {ctx.get('max_length')} символов"
+    if kind == "too_short":
+        return "Список не может быть пустым" if ctx.get("min_length") == 1 else f"Минимум {ctx.get('min_length')} элементов"
+    if kind == "too_long":
+        return f"Максимум {ctx.get('max_length')} элементов"
+    if kind == "greater_than":
+        return f"Значение должно быть больше {ctx.get('gt')}"
+    if kind == "greater_than_equal":
+        return f"Значение должно быть не меньше {ctx.get('ge')}"
+    if kind == "less_than_equal":
+        return f"Значение должно быть не больше {ctx.get('le')}"
+    if kind in ("int_parsing", "int_type", "decimal_parsing", "float_parsing", "decimal_type"):
+        return "Введите число"
+    if kind in ("decimal_max_places", "decimal_max_digits"):
+        return "Не больше двух знаков после запятой"
+    if kind in ("string_type", "model_type", "dict_type", "list_type"):
+        return "Неверный формат значения"
+    if kind == "json_invalid":
+        return "Некорректный JSON"
+    return msg
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
@@ -130,11 +167,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         details = [
-            {"field": ".".join(str(p) for p in err.get("loc", ()) if p != "body"), "message": err.get("msg", "")}
+            {"field": ".".join(str(p) for p in err.get("loc", ()) if p != "body"), "message": humanize_validation_error(err)}
             for err in exc.errors()
         ]
         logger.warning("validation failed", extra=log_extra(details=details))
-        return JSONResponse(status_code=422, content=error_body("validation_error", "Invalid input data", details))
+        return JSONResponse(status_code=422, content=error_body("validation_error", "Проверьте введённые данные", details))
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:

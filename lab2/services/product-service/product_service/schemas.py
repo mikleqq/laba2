@@ -8,15 +8,15 @@ from shopcommon.schemas import Money
 
 
 class ProductCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=2, max_length=120)
     description: str = Field(default="", max_length=2000)
-    category: str = Field(default="general", min_length=1, max_length=60)
-    price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
-    stock: int = Field(default=0, ge=0)
+    category: str = Field(default="accessories", min_length=2, max_length=60, pattern=r"^[a-z_]+$")
+    price: Decimal = Field(gt=0, le=1_000_000, max_digits=12, decimal_places=2)
+    stock: int = Field(default=0, ge=0, le=100_000)
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {"name": "Mechanical keyboard", "category": "electronics", "price": 89.99, "stock": 25}
+            "example": {"name": "Смартфон Nova X12, 128 ГБ", "category": "smartphones", "price": 499, "stock": 18}
         }
     )
 
@@ -24,9 +24,9 @@ class ProductCreate(BaseModel):
 class ProductUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     description: Optional[str] = Field(default=None, max_length=2000)
-    category: Optional[str] = Field(default=None, min_length=1, max_length=60)
-    price: Optional[Decimal] = Field(default=None, gt=0, max_digits=12, decimal_places=2)
-    stock: Optional[int] = Field(default=None, ge=0)
+    category: Optional[str] = Field(default=None, min_length=2, max_length=60, pattern=r"^[a-z_]+$")
+    price: Optional[Decimal] = Field(default=None, gt=0, le=1_000_000, max_digits=12, decimal_places=2)
+    stock: Optional[int] = Field(default=None, ge=0, le=100_000)
 
 
 class ProductOut(BaseModel):

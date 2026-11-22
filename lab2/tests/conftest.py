@@ -39,6 +39,7 @@ def auth(user_id: int = 1, email: str = "alice@example.com", role: str = "custom
 
 
 ADMIN = auth(999, "admin@example.com", "admin")
+DELIVERY = {"recipient": "Алиса Иванова", "phone": "+373 69 123 456", "address": "Кишинёв, ул. Пушкина, 10"}
 INTERNAL = {"X-Internal-Token": INTERNAL_TOKEN}
 
 
