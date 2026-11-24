@@ -114,7 +114,9 @@ A PostgreSQL that is not on `localhost:5432` can be selected with `DB_HOST` / `D
 ## Fault isolation demo (manual)
 
 The shop page shows a short notice only in the part that depends on the missing service
-("Каталог временно не обновляется", "Статус оплаты временно не обновляется", …) and keeps everything else working.
+("Каталог временно недоступен", "Статус оплаты временно недоступен", …) and keeps everything else working.
+Data of an unavailable service is not shown at all: the page keeps no cached copies (only the cart is stored
+in the browser, with its own name/price snapshot), so what you see always comes from a running service.
 The footer shows the live state of the 6 services.
 
 ```powershell
